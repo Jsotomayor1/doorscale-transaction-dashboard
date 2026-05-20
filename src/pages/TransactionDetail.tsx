@@ -11,6 +11,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TaskItem } from "@/components/TaskItem";
 import {
   Card,
   CardContent,
@@ -63,18 +64,6 @@ function stageVariant(stage: string) {
   if (stage === "Closed") return "muted";
   if (stage === "Dead") return "danger";
   return "default";
-}
-
-function taskVariant(status: string) {
-  const normalizedStatus = status.toLowerCase();
-
-  if (normalizedStatus === "pending") return "warning";
-  if (normalizedStatus === "completed" || normalizedStatus === "done") {
-    return "success";
-  }
-  if (normalizedStatus === "blocked") return "danger";
-
-  return "muted";
 }
 
 export default function TransactionDetail() {
@@ -314,17 +303,12 @@ export default function TransactionDetail() {
             {relatedTasks.length ? (
               <div className="task-list">
                 {relatedTasks.map((task) => (
-                  <article className="task-row" key={task.id}>
-                    <div>
-                      <h3>{task.title}</h3>
-                      <p>{task.assignedTo || "Unassigned"}</p>
-                    </div>
-                    <Badge variant={taskVariant(task.status)}>{task.status}</Badge>
-                    <span className="task-row__due">
-                      <CheckSquare size={15} />
-                      {formatDate(task.dueDate)}
-                    </span>
-                  </article>
+                  <TaskItem
+                    key={task.id}
+                    onComplete={data.markTaskCompleted}
+                    onUpdateDueDateTime={data.updateTaskDueDateTime}
+                    task={task}
+                  />
                 ))}
               </div>
             ) : (

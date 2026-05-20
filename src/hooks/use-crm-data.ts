@@ -43,6 +43,12 @@ export type UpdateTransactionStageInput = {
   stage: TransactionStage;
 };
 
+export type UpdateTaskDueDateTimeInput = {
+  taskId: string;
+  dueDate: string;
+  dueTime: string;
+};
+
 export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done" | string;
 
 export type TransactionTask = {
@@ -50,6 +56,7 @@ export type TransactionTask = {
   title: string;
   status: TaskStatus;
   dueDate: string;
+  dueDateTime: string;
   owner: string;
 };
 
@@ -100,6 +107,7 @@ export type DashboardTask = {
   id: string;
   title: string;
   dueDate: string;
+  dueDateTime: string;
   assignedTo: string;
   status: string;
   relatedOpportunityId: string;
@@ -130,6 +138,7 @@ type SupabaseTask = {
   transaction_id: string | null;
   title: string | null;
   due_date: string | null;
+  due_datetime: string | null;
   status: string | null;
   assigned_to: string | null;
   created_at: string | null;
@@ -177,6 +186,7 @@ const demoTransactions: Transaction[] = [
         title: "Confirm inspection repair response",
         status: "pending",
         dueDate: addDays(today, 1).toISOString(),
+        dueDateTime: addDays(today, 1).toISOString(),
         owner: "Transaction Coordinator",
       },
       {
@@ -184,6 +194,7 @@ const demoTransactions: Transaction[] = [
         title: "Upload earnest money receipt",
         status: "completed",
         dueDate: subDays(today, 1).toISOString(),
+        dueDateTime: subDays(today, 1).toISOString(),
         owner: "Agent",
       },
     ],
@@ -209,6 +220,7 @@ const demoTransactions: Transaction[] = [
         title: "Send appraisal access instructions",
         status: "pending",
         dueDate: addDays(today, 2).toISOString(),
+        dueDateTime: addDays(today, 2).toISOString(),
         owner: "Agent",
       },
       {
@@ -216,6 +228,7 @@ const demoTransactions: Transaction[] = [
         title: "Verify payoff statement request",
         status: "pending",
         dueDate: addDays(today, 5).toISOString(),
+        dueDateTime: addDays(today, 5).toISOString(),
         owner: "Closing Team",
       },
     ],
@@ -329,6 +342,7 @@ function mapSupabaseData(
         title: task.title ?? "Untitled task",
         status: task.status ?? "pending",
         dueDate: task.due_date ?? "",
+        dueDateTime: task.due_datetime ?? task.due_date ?? "",
         owner: task.assigned_to ?? "",
       })),
     };
@@ -353,6 +367,7 @@ function mapSupabaseData(
         id: task.id,
         title: task.title ?? "Untitled task",
         dueDate: task.due_date ?? "",
+        dueDateTime: task.due_datetime ?? task.due_date ?? "",
         assignedTo: task.assigned_to ?? "",
         status: task.status ?? "pending",
         relatedOpportunityId: task.transaction_id ?? "",
@@ -369,6 +384,7 @@ function mapDemoData(): CrmDataState {
     transaction.tasks.map((task) => ({
       ...task,
       dueDate: task.dueDate,
+      dueDateTime: task.dueDate,
       assignedTo: task.owner,
       relatedOpportunityId: transaction.id,
       transactionId: transaction.id,
@@ -418,7 +434,7 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
     client
       .from("tasks")
       .select(
-        "id, location_id, transaction_id, title, due_date, status, assigned_to, created_at",
+        "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, created_at",
       )
       .eq("location_id", LOCATION_ID),
   ]);
@@ -481,16 +497,22 @@ async function generateChecklistTasks(
 
       return title ? !existingTitles.has(title) : false;
     })
-    .map((template) => ({
-      location_id: LOCATION_ID,
-      transaction_id: transactionId,
-      title: template.title ?? "Untitled task",
-      due_date: addDays(new Date(), Number(template.days_offset ?? 0))
-        .toISOString()
-        .slice(0, 10),
-      status: "pending",
-      assigned_to: template.assigned_role || "Agent",
-    }));
+    .map((template) => {
+      const dueDateTime = addDays(
+        new Date(),
+        Number(template.days_offset ?? 0),
+      );
+
+      return {
+        location_id: LOCATION_ID,
+        transaction_id: transactionId,
+        title: template.title ?? "Untitled task",
+        due_date: dueDateTime.toISOString().slice(0, 10),
+        due_datetime: dueDateTime.toISOString(),
+        status: "pending",
+        assigned_to: template.assigned_role || "Agent",
+      };
+    });
 
   if (!taskRows.length) return;
 
@@ -695,6 +717,88 @@ export function useCrmData() {
     [refreshData],
   );
 
+  const markTaskCompleted = useCallback(
+    async (taskId: string) => {
+      if (isDemoMode()) {
+        setData((currentData) => ({
+          ...currentData,
+          tasks: currentData.tasks.map((task) =>
+            task.id === taskId ? { ...task, status: "completed" } : task,
+          ),
+        }));
+        return;
+      }
+
+      const client = getSupabaseClient();
+
+      if (!client) {
+        throw new Error("Supabase environment variables are not configured.");
+      }
+
+      const { error: updateError } = await client
+        .from("tasks")
+        .update({ status: "completed" })
+        .eq("location_id", LOCATION_ID)
+        .eq("id", taskId);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      await refreshData();
+    },
+    [refreshData],
+  );
+
+  const updateTaskDueDateTime = useCallback(
+    async ({ dueDate, dueTime, taskId }: UpdateTaskDueDateTimeInput) => {
+      const dueDateTime =
+        dueDate && dueTime
+          ? new Date(`${dueDate}T${dueTime}`).toISOString()
+          : dueDate
+            ? new Date(`${dueDate}T00:00`).toISOString()
+            : null;
+
+      if (isDemoMode()) {
+        setData((currentData) => ({
+          ...currentData,
+          tasks: currentData.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  dueDate,
+                  dueDateTime: dueDateTime ?? "",
+                }
+              : task,
+          ),
+        }));
+        return;
+      }
+
+      const client = getSupabaseClient();
+
+      if (!client) {
+        throw new Error("Supabase environment variables are not configured.");
+      }
+
+      const { error: updateError } = await client
+        .from("tasks")
+        .update({
+          due_date: dueDate || null,
+          due_datetime: dueDateTime,
+        })
+        .eq("location_id", LOCATION_ID)
+        .eq("id", taskId);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      await refreshData();
+    },
+    [refreshData],
+  );
+
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
@@ -731,7 +835,17 @@ export function useCrmData() {
       activeTransactions,
       openTasks: data.tasks.filter(
         (task) => task.status.toLowerCase() === "pending",
-      ),
+      ).sort((firstTask, secondTask) => {
+        const firstDate = new Date(
+          firstTask.dueDateTime || firstTask.dueDate,
+        ).getTime();
+        const secondDate = new Date(
+          secondTask.dueDateTime || secondTask.dueDate,
+        ).getTime();
+
+        return (Number.isNaN(firstDate) ? Infinity : firstDate) -
+          (Number.isNaN(secondDate) ? Infinity : secondDate);
+      }),
       totalCommission,
       stageCounts,
       loading,
@@ -739,8 +853,19 @@ export function useCrmData() {
       refreshData,
       createTransaction,
       updateTransactionStage,
+      markTaskCompleted,
+      updateTaskDueDateTime,
     };
-  }, [createTransaction, data, error, loading, refreshData, updateTransactionStage]);
+  }, [
+    createTransaction,
+    data,
+    error,
+    loading,
+    markTaskCompleted,
+    refreshData,
+    updateTaskDueDateTime,
+    updateTransactionStage,
+  ]);
 }
 
 export const useCRMData = useCrmData;

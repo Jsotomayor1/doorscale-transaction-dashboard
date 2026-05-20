@@ -1,40 +1,20 @@
 import { useState } from "react";
-import { format } from "date-fns";
-import { CalendarClock, CheckSquare } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { CheckSquare } from "lucide-react";
+import { TaskItem } from "@/components/TaskItem";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { useCRMData } from "@/hooks/use-crm-data";
 
-function formatDate(dateValue: string) {
-  const date = new Date(dateValue);
-
-  if (!dateValue || Number.isNaN(date.getTime())) {
-    return "No due date";
-  }
-
-  return format(date, "MMM d, yyyy");
-}
-
-function taskVariant(status: string) {
-  const normalizedStatus = status.toLowerCase();
-
-  if (normalizedStatus === "pending") return "warning";
-  if (normalizedStatus === "completed" || normalizedStatus === "done") {
-    return "success";
-  }
-  if (normalizedStatus === "blocked") return "danger";
-
-  return "muted";
-}
-
 export default function Tasks() {
-  const { error, loading, tasks } = useCRMData();
+  const {
+    error,
+    loading,
+    markTaskCompleted,
+    tasks,
+    updateTaskDueDateTime,
+  } = useCRMData();
   const [statusFilter, setStatusFilter] = useState("all");
 
   const filteredTasks = tasks.filter((task) => {
@@ -70,36 +50,13 @@ export default function Tasks() {
 
       <section className="entity-grid" aria-label="Tasks">
         {filteredTasks.map((task) => (
-          <Card key={task.id}>
-            <CardHeader>
-              <div>
-                <CardTitle>{task.title}</CardTitle>
-                <CardDescription>
-                  {task.propertyAddress || task.clientName || "No related transaction"}
-                </CardDescription>
-              </div>
-              <Badge variant={taskVariant(task.status)}>{task.status}</Badge>
-            </CardHeader>
-            <CardContent>
-              <dl className="detail-list">
-                <div>
-                  <dt>Due Date</dt>
-                  <dd>
-                    <CalendarClock size={15} />
-                    {formatDate(task.dueDate)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Assigned To</dt>
-                  <dd>{task.assignedTo || "Unassigned"}</dd>
-                </div>
-                <div>
-                  <dt>Related Transaction</dt>
-                  <dd>{task.propertyAddress || task.relatedOpportunityId || "None"}</dd>
-                </div>
-              </dl>
-            </CardContent>
-          </Card>
+          <TaskItem
+            key={task.id}
+            onComplete={markTaskCompleted}
+            onUpdateDueDateTime={updateTaskDueDateTime}
+            showContext
+            task={task}
+          />
         ))}
       </section>
 

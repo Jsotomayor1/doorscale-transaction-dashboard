@@ -35,20 +35,20 @@ function taskVariant(status: string) {
   return "muted";
 }
 
-function isDueSoon(dueDate: string) {
-  const date = new Date(dueDate);
+function isDueSoon(dueDateValue: string) {
+  const date = new Date(dueDateValue);
 
-  return dueDate ? isBefore(date, startOfTomorrow()) : false;
+  return dueDateValue ? isBefore(date, startOfTomorrow()) : false;
 }
 
-function formatDueDate(dueDate: string) {
-  const date = new Date(dueDate);
+function formatDueDate(dueDateValue: string) {
+  const date = new Date(dueDateValue);
 
-  if (!dueDate || Number.isNaN(date.getTime())) {
+  if (!dueDateValue || Number.isNaN(date.getTime())) {
     return "No due date";
   }
 
-  return format(date, "MMM d");
+  return format(date, "MMM d, h:mm a");
 }
 
 export default function Index() {
@@ -66,7 +66,9 @@ export default function Index() {
     transactions,
   } = useCrmData();
 
-  const urgentTasks = openTasks.filter((task) => isDueSoon(task.dueDate));
+  const urgentTasks = openTasks.filter((task) =>
+    isDueSoon(task.dueDateTime || task.dueDate),
+  );
 
   return (
     <div className="dashboard">
@@ -186,7 +188,7 @@ export default function Index() {
                   <Badge variant={taskVariant(task.status)}>{task.status}</Badge>
                   <span className="task-row__due">
                     <AlertTriangle size={15} />
-                    {formatDueDate(task.dueDate)}
+                    {formatDueDate(task.dueDateTime || task.dueDate)}
                   </span>
                 </article>
               ))}
