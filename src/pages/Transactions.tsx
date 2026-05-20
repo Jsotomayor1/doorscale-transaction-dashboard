@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { CalendarClock, Filter, Home, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -112,44 +113,51 @@ export default function Transactions() {
 
       <section className="entity-grid" aria-label="Transactions">
         {filteredTransactions.map((transaction) => (
-          <Card key={transaction.id}>
-            <CardHeader>
-              <div>
-                <CardTitle>{transaction.propertyAddress}</CardTitle>
-                <CardDescription>{participantLine(transaction)}</CardDescription>
-              </div>
-              <Badge variant={stageVariant(transaction.stage)}>
-                {transaction.stage}
-              </Badge>
-            </CardHeader>
-            <CardContent>
-              <dl className="detail-list">
+          <Link
+            aria-label={`Open transaction ${transaction.propertyAddress}`}
+            className="transaction-card-link"
+            key={transaction.id}
+            to={`/transactions/${transaction.id}`}
+          >
+            <Card>
+              <CardHeader>
                 <div>
-                  <dt>Transaction Type</dt>
-                  <dd>{transaction.type || "Not set"}</dd>
+                  <CardTitle>{transaction.propertyAddress}</CardTitle>
+                  <CardDescription>{participantLine(transaction)}</CardDescription>
                 </div>
-                <div>
-                  <dt>Closing Date</dt>
-                  <dd>
-                    <CalendarClock size={15} />
-                    {formatDate(transaction.closeDate)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Inspection Date</dt>
-                  <dd>{formatDate(transaction.inspectionDate)}</dd>
-                </div>
-                <div>
-                  <dt>Commission</dt>
-                  <dd>{formatCurrency(transaction.commission)}</dd>
-                </div>
-                <div>
-                  <dt>Status</dt>
-                  <dd>{transaction.status || "Not set"}</dd>
-                </div>
-              </dl>
-            </CardContent>
-          </Card>
+                <Badge variant={stageVariant(transaction.stage)}>
+                  {transaction.stage}
+                </Badge>
+              </CardHeader>
+              <CardContent>
+                <dl className="detail-list">
+                  <div>
+                    <dt>Transaction Type</dt>
+                    <dd>{transaction.type || "Not set"}</dd>
+                  </div>
+                  <div>
+                    <dt>Closing Date</dt>
+                    <dd>
+                      <CalendarClock size={15} />
+                      {formatDate(transaction.closeDate)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Inspection Date</dt>
+                    <dd>{formatDate(transaction.inspectionDate)}</dd>
+                  </div>
+                  <div>
+                    <dt>Commission</dt>
+                    <dd>{formatCurrency(transaction.commission)}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{transaction.status || "Not set"}</dd>
+                  </div>
+                </dl>
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </section>
 
