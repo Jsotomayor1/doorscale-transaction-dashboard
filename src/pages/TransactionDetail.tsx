@@ -4,11 +4,13 @@ import {
   CalendarClock,
   CheckSquare,
   FileText,
+  Pencil,
   StickyNote,
   Upload,
 } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { EditTransactionModal } from "@/components/EditTransactionModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TaskItem } from "@/components/TaskItem";
@@ -72,6 +74,9 @@ export default function TransactionDetail() {
   const [stageMessage, setStageMessage] = useState("");
   const [stageError, setStageError] = useState("");
   const [isUpdatingStage, setIsUpdatingStage] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [detailMessage, setDetailMessage] = useState("");
+  const [detailError, setDetailError] = useState("");
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -173,6 +178,16 @@ export default function TransactionDetail() {
       </header>
 
       <section className="workspace-actions" aria-label="Transaction actions">
+        <Button
+          onClick={() => {
+            setDetailMessage("");
+            setDetailError("");
+            setIsEditOpen(true);
+          }}
+        >
+          <Pencil size={17} />
+          Edit Transaction
+        </Button>
         <Button disabled>
           <CheckSquare size={17} />
           Add Task
@@ -185,6 +200,32 @@ export default function TransactionDetail() {
           Open in GHL
         </Button>
       </section>
+
+      {detailMessage ? (
+        <p className="dashboard__success">{detailMessage}</p>
+      ) : null}
+      {detailError ? <p className="dashboard__error">{detailError}</p> : null}
+
+      <EditTransactionModal
+        isOpen={isEditOpen}
+        onClose={() => setIsEditOpen(false)}
+        onSave={async (input) => {
+          setDetailMessage("");
+          setDetailError("");
+          try {
+            await data.updateTransactionDetails(input);
+            setDetailMessage("Transaction details updated.");
+          } catch (error) {
+            setDetailError(
+              error instanceof Error
+                ? error.message
+                : "Unable to update transaction.",
+            );
+            throw error;
+          }
+        }}
+        transaction={transaction}
+      />
 
       <Card>
         <CardHeader>

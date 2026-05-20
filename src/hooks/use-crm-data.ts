@@ -49,6 +49,18 @@ export type UpdateTaskDueDateTimeInput = {
   dueTime: string;
 };
 
+export type UpdateTransactionDetailsInput = {
+  transactionId: string;
+  propertyAddress: string;
+  transactionType: string;
+  buyerName: string;
+  sellerName: string;
+  closingDate: string;
+  inspectionDate: string;
+  commission: string;
+  status: string;
+};
+
 export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done" | string;
 
 export type TransactionTask = {
@@ -717,6 +729,93 @@ export function useCrmData() {
     [refreshData],
   );
 
+  const updateTransactionDetails = useCallback(
+    async (input: UpdateTransactionDetailsInput) => {
+      const commission = Number(input.commission || 0);
+
+      if (isDemoMode()) {
+        const updatedAt = new Date().toISOString();
+
+        setData((currentData) => ({
+          transactions: currentData.transactions.map((transaction) =>
+            transaction.id === input.transactionId
+              ? {
+                  ...transaction,
+                  clientName:
+                    input.buyerName ||
+                    input.sellerName ||
+                    input.propertyAddress ||
+                    transaction.clientName,
+                  propertyAddress: input.propertyAddress,
+                  type: input.transactionType,
+                  closeDate: input.closingDate,
+                  inspectionDate: input.inspectionDate,
+                  commission,
+                  contractValue: commission,
+                  status: input.status,
+                  buyerName: input.buyerName,
+                  sellerName: input.sellerName,
+                  updatedAt,
+                }
+              : transaction,
+          ),
+          opportunities: currentData.opportunities.map((opportunity) =>
+            String(opportunity.id) === String(input.transactionId)
+              ? {
+                  ...opportunity,
+                  name: input.propertyAddress,
+                  status: input.status,
+                  value: commission,
+                  updatedAt,
+                  customFields: {
+                    ...opportunity.customFields,
+                    propertyAddress: input.propertyAddress,
+                    transactionType: input.transactionType,
+                    buyerName: input.buyerName,
+                    sellerName: input.sellerName,
+                    closingDate: input.closingDate,
+                    inspectionDeadline: input.inspectionDate,
+                    grossCommission: commission,
+                    netCommission: commission,
+                    agentPayout: commission,
+                  },
+                }
+              : opportunity,
+          ),
+          tasks: currentData.tasks,
+        }));
+        return;
+      }
+
+      const client = getSupabaseClient();
+
+      if (!client) {
+        throw new Error("Supabase environment variables are not configured.");
+      }
+
+      const { error: updateError } = await client
+        .from("transactions")
+        .update({
+          property_address: input.propertyAddress,
+          transaction_type: input.transactionType,
+          buyer_name: input.buyerName || null,
+          seller_name: input.sellerName || null,
+          closing_date: input.closingDate || null,
+          inspection_date: input.inspectionDate || null,
+          commission,
+          status: input.status,
+        })
+        .eq("id", input.transactionId);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      await refreshData();
+    },
+    [refreshData],
+  );
+
   const markTaskCompleted = useCallback(
     async (taskId: string) => {
       if (isDemoMode()) {
@@ -852,6 +951,7 @@ export function useCrmData() {
       error,
       refreshData,
       createTransaction,
+      updateTransactionDetails,
       updateTransactionStage,
       markTaskCompleted,
       updateTaskDueDateTime,
@@ -863,6 +963,7 @@ export function useCrmData() {
     loading,
     markTaskCompleted,
     refreshData,
+    updateTransactionDetails,
     updateTaskDueDateTime,
     updateTransactionStage,
   ]);
