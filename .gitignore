@@ -1,0 +1,9 @@
+dist
+node_modules
+.npm-cache
+git-meta
+public/src
+.env
+.env.local
+.env.*.local
+*.tsbuildinfo
