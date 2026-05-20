@@ -131,6 +131,20 @@
   line-height: 1.6;
 }
 
+.dashboard__status,
+.dashboard__error {
+  margin-top: 10px !important;
+  font-weight: 750;
+}
+
+.dashboard__status {
+  color: #1f6f5b !important;
+}
+
+.dashboard__error {
+  color: #b91c1c !important;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

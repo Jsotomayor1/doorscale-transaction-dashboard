@@ -31,6 +31,8 @@ function taskVariant(status: string) {
 export default function Index() {
   const {
     activeTransactions,
+    error,
+    loading,
     openTasks,
     stageCounts,
     tasks,
@@ -52,6 +54,8 @@ export default function Index() {
             Track active contracts, task pressure, deadlines, commissions, and
             workflow stages in one place.
           </p>
+          {loading ? <p className="dashboard__status">Loading Supabase data...</p> : null}
+          {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
         <Button>
           <Plus size={17} />

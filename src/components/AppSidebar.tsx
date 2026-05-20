@@ -35,7 +35,7 @@ export function AppSidebar() {
 
       <div className="sidebar__footer">
         <BarChart3 size={18} />
-        <span>Mock CRM data ready for Supabase and GoHighLevel.</span>
+        <span>Live Supabase data ready for transaction operations.</span>
       </div>
     </aside>
   );

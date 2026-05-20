@@ -14,6 +14,16 @@ function stageVariant(stage: Transaction["stage"]) {
   return "default";
 }
 
+function formatCloseDate(closeDate: string) {
+  const date = new Date(closeDate);
+
+  if (!closeDate || Number.isNaN(date.getTime())) {
+    return "Closing date pending";
+  }
+
+  return `${format(date, "MMM d")} closes in ${formatDistanceToNowStrict(date)}`;
+}
+
 export function RecentSales({ transactions }: RecentSalesProps) {
   return (
     <div className="transaction-list">
@@ -36,8 +46,7 @@ export function RecentSales({ transactions }: RecentSalesProps) {
             <span>{formatCurrency(transaction.contractValue)}</span>
             <span>
               <CalendarClock size={15} />
-              {format(new Date(transaction.closeDate), "MMM d")} closes in{" "}
-              {formatDistanceToNowStrict(new Date(transaction.closeDate))}
+              {formatCloseDate(transaction.closeDate)}
             </span>
           </div>
         </article>

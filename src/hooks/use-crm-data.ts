@@ -1,4 +1,8 @@
+import { useEffect, useMemo, useState } from "react";
 import { addDays, subDays } from "date-fns";
+import { createClient } from "@supabase/supabase-js";
+
+const LOCATION_ID = "demo-location";
 
 export type TransactionStage =
   | "Lead"
@@ -8,9 +12,9 @@ export type TransactionStage =
   | "Closing"
   | "Closed";
 
-export type TransactionType = "Buyer" | "Seller" | "Dual Agency";
+export type TransactionType = string;
 
-export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done";
+export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done" | string;
 
 export type TransactionTask = {
   id: string;
@@ -29,12 +33,85 @@ export type Transaction = {
   closeDate: string;
   contractValue: number;
   commission: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
   tasks: TransactionTask[];
+};
+
+export type Opportunity = {
+  id: string;
+  name: string;
+  contactId: string;
+  pipelineId: string;
+  stage: string;
+  status: string;
+  assignedTo: string;
+  value: number;
+  createdAt: string;
+  updatedAt: string;
+  customFields: {
+    propertyAddress: string;
+    transactionType: string;
+    closingDate: string;
+    inspectionDeadline: string;
+    buyerName: string;
+    sellerName: string;
+    grossCommission: number;
+    netCommission: number;
+    agentPayout: number;
+    missingDocuments: string[];
+  };
+};
+
+export type DashboardTask = {
+  id: string;
+  title: string;
+  dueDate: string;
+  assignedTo: string;
+  status: string;
+  relatedOpportunityId: string;
+  transactionId: string;
+  propertyAddress: string;
+  clientName: string;
+};
+
+type SupabaseTransaction = {
+  id: string;
+  location_id: string;
+  property_address: string | null;
+  transaction_type: string | null;
+  stage: string | null;
+  buyer_name: string | null;
+  seller_name: string | null;
+  closing_date: string | null;
+  inspection_date: string | null;
+  commission: number | null;
+  status: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type SupabaseTask = {
+  id: string;
+  location_id: string;
+  transaction_id: string | null;
+  title: string | null;
+  due_date: string | null;
+  status: string | null;
+  assigned_to: string | null;
+  created_at: string | null;
+};
+
+type CrmDataState = {
+  transactions: Transaction[];
+  opportunities: Opportunity[];
+  tasks: DashboardTask[];
 };
 
 const today = new Date();
 
-const transactions: Transaction[] = [
+const demoTransactions: Transaction[] = [
   {
     id: "txn-1001",
     clientName: "Avery Johnson",
@@ -44,6 +121,9 @@ const transactions: Transaction[] = [
     closeDate: addDays(today, 18).toISOString(),
     contractValue: 645000,
     commission: 19350,
+    status: "active",
+    createdAt: subDays(today, 12).toISOString(),
+    updatedAt: today.toISOString(),
     tasks: [
       {
         id: "task-1",
@@ -70,6 +150,9 @@ const transactions: Transaction[] = [
     closeDate: addDays(today, 27).toISOString(),
     contractValue: 785000,
     commission: 23550,
+    status: "active",
+    createdAt: subDays(today, 9).toISOString(),
+    updatedAt: today.toISOString(),
     tasks: [
       {
         id: "task-3",
@@ -87,93 +170,300 @@ const transactions: Transaction[] = [
       },
     ],
   },
-  {
-    id: "txn-1003",
-    clientName: "Priya Shah",
-    propertyAddress: "77 Magnolia Park Ln, Raleigh, NC",
-    type: "Dual Agency",
-    stage: "Closing",
-    closeDate: addDays(today, 7).toISOString(),
-    contractValue: 532000,
-    commission: 31920,
-    tasks: [
-      {
-        id: "task-5",
-        title: "Review final CD with client",
-        status: "Blocked",
-        dueDate: addDays(today, 0).toISOString(),
-        owner: "Agent",
-      },
-      {
-        id: "task-6",
-        title: "Confirm wire instructions were received",
-        status: "Open",
-        dueDate: addDays(today, 1).toISOString(),
-        owner: "Closing Team",
-      },
-    ],
-  },
-  {
-    id: "txn-1004",
-    clientName: "Elliot Brooks",
-    propertyAddress: "304 W Stonebridge Ct, Denver, CO",
-    type: "Buyer",
-    stage: "Under Contract",
-    closeDate: addDays(today, 34).toISOString(),
-    contractValue: 710000,
-    commission: 21300,
-    tasks: [
-      {
-        id: "task-7",
-        title: "Schedule home inspection",
-        status: "Open",
-        dueDate: addDays(today, 3).toISOString(),
-        owner: "Transaction Coordinator",
-      },
-    ],
-  },
 ];
 
-export function useCrmData() {
-  const tasks = transactions.flatMap((transaction) =>
+function isDemoMode() {
+  return (
+    import.meta.env.DEMO_MODE === "true" ||
+    import.meta.env.VITE_DEMO_MODE === "true"
+  );
+}
+
+function getSupabaseClient() {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey);
+}
+
+function normalizeStage(stage: string | null): TransactionStage {
+  const stageMap: Record<string, TransactionStage> = {
+    lead: "Lead",
+    "under contract": "Under Contract",
+    inspection: "Inspection",
+    appraisal: "Appraisal",
+    closing: "Closing",
+    closed: "Closed",
+  };
+
+  return stageMap[(stage ?? "").toLowerCase()] ?? "Lead";
+}
+
+function getClientName(transaction: SupabaseTransaction) {
+  return (
+    transaction.buyer_name ||
+    transaction.seller_name ||
+    transaction.property_address ||
+    "Unknown Client"
+  );
+}
+
+function toOpportunity(
+  transaction: SupabaseTransaction,
+  relatedTasks: SupabaseTask[],
+): Opportunity {
+  const commission = Number(transaction.commission ?? 0);
+  const assignedTo = relatedTasks.find((task) => task.assigned_to)?.assigned_to ?? "";
+
+  return {
+    id: transaction.id,
+    name: transaction.property_address ?? "Untitled transaction",
+    contactId: "",
+    pipelineId: "Transaction Management",
+    stage: transaction.stage ?? "Lead",
+    status: transaction.status ?? "active",
+    assignedTo,
+    value: commission,
+    createdAt: transaction.created_at ?? "",
+    updatedAt: transaction.updated_at ?? transaction.created_at ?? "",
+    customFields: {
+      propertyAddress: transaction.property_address ?? "",
+      transactionType: transaction.transaction_type ?? "",
+      closingDate: transaction.closing_date ?? "",
+      inspectionDeadline: transaction.inspection_date ?? "",
+      buyerName: transaction.buyer_name ?? "",
+      sellerName: transaction.seller_name ?? "",
+      grossCommission: commission,
+      netCommission: commission,
+      agentPayout: commission,
+      missingDocuments: [],
+    },
+  };
+}
+
+function mapSupabaseData(
+  supabaseTransactions: SupabaseTransaction[],
+  supabaseTasks: SupabaseTask[],
+): CrmDataState {
+  const transactions = supabaseTransactions.map<Transaction>((transaction) => {
+    const relatedTasks = supabaseTasks.filter(
+      (task) => task.transaction_id === transaction.id,
+    );
+    const commission = Number(transaction.commission ?? 0);
+
+    return {
+      id: transaction.id,
+      clientName: getClientName(transaction),
+      propertyAddress: transaction.property_address ?? "Untitled transaction",
+      type: transaction.transaction_type ?? "",
+      stage: normalizeStage(transaction.stage),
+      closeDate: transaction.closing_date ?? "",
+      contractValue: commission,
+      commission,
+      status: transaction.status ?? "active",
+      createdAt: transaction.created_at ?? "",
+      updatedAt: transaction.updated_at ?? transaction.created_at ?? "",
+      tasks: relatedTasks.map((task) => ({
+        id: task.id,
+        title: task.title ?? "Untitled task",
+        status: task.status ?? "Open",
+        dueDate: task.due_date ?? "",
+        owner: task.assigned_to ?? "",
+      })),
+    };
+  });
+
+  const transactionById = new Map(
+    transactions.map((transaction) => [transaction.id, transaction]),
+  );
+
+  return {
+    transactions,
+    opportunities: supabaseTransactions.map((transaction) =>
+      toOpportunity(
+        transaction,
+        supabaseTasks.filter((task) => task.transaction_id === transaction.id),
+      ),
+    ),
+    tasks: supabaseTasks.map((task) => {
+      const transaction = transactionById.get(task.transaction_id ?? "");
+
+      return {
+        id: task.id,
+        title: task.title ?? "Untitled task",
+        dueDate: task.due_date ?? "",
+        assignedTo: task.assigned_to ?? "",
+        status: task.status ?? "Open",
+        relatedOpportunityId: task.transaction_id ?? "",
+        transactionId: task.transaction_id ?? "",
+        propertyAddress: transaction?.propertyAddress ?? "",
+        clientName: transaction?.clientName ?? "",
+      };
+    }),
+  };
+}
+
+function mapDemoData(): CrmDataState {
+  const tasks = demoTransactions.flatMap((transaction) =>
     transaction.tasks.map((task) => ({
       ...task,
+      dueDate: task.dueDate,
+      assignedTo: task.owner,
+      relatedOpportunityId: transaction.id,
       transactionId: transaction.id,
       propertyAddress: transaction.propertyAddress,
       clientName: transaction.clientName,
     })),
   );
 
-  const totalCommission = transactions.reduce(
-    (sum, transaction) => sum + transaction.commission,
-    0,
-  );
-
-  const activeTransactions = transactions.filter(
-    (transaction) => transaction.stage !== "Closed",
-  );
-
-  const stageCounts = transactions.reduce<Record<TransactionStage, number>>(
-    (counts, transaction) => ({
-      ...counts,
-      [transaction.stage]: counts[transaction.stage] + 1,
-    }),
-    {
-      Lead: 0,
-      "Under Contract": 0,
-      Inspection: 0,
-      Appraisal: 0,
-      Closing: 0,
-      Closed: 0,
-    },
-  );
-
   return {
-    transactions,
-    activeTransactions,
+    transactions: demoTransactions,
+    opportunities: demoTransactions.map((transaction) => ({
+      id: transaction.id,
+      name: transaction.propertyAddress,
+      contactId: "",
+      pipelineId: "Transaction Management",
+      stage: transaction.stage,
+      status: transaction.status,
+      assignedTo: transaction.tasks.find((task) => task.owner)?.owner ?? "",
+      value: transaction.commission,
+      createdAt: transaction.createdAt,
+      updatedAt: transaction.updatedAt,
+      customFields: {
+        propertyAddress: transaction.propertyAddress,
+        transactionType: transaction.type,
+        closingDate: transaction.closeDate,
+        inspectionDeadline: "",
+        buyerName: transaction.type === "Buyer" ? transaction.clientName : "",
+        sellerName: transaction.type === "Seller" ? transaction.clientName : "",
+        grossCommission: transaction.commission,
+        netCommission: transaction.commission,
+        agentPayout: transaction.commission,
+        missingDocuments: [],
+      },
+    })),
     tasks,
-    openTasks: tasks.filter((task) => task.status !== "Done"),
-    totalCommission,
-    stageCounts,
   };
+}
+
+const emptyData: CrmDataState = {
+  transactions: [],
+  opportunities: [],
+  tasks: [],
+};
+
+export function useCrmData() {
+  const [data, setData] = useState<CrmDataState>(() =>
+    isDemoMode() ? mapDemoData() : emptyData,
+  );
+  const [loading, setLoading] = useState(!isDemoMode());
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isDemoMode()) {
+      setData(mapDemoData());
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      setLoading(false);
+      setError("Supabase environment variables are not configured.");
+      return;
+    }
+
+    const client = supabase;
+    let isMounted = true;
+
+    async function loadCrmData() {
+      setLoading(true);
+      setError(null);
+
+      const [transactionsResult, tasksResult] = await Promise.all([
+        client
+          .from("transactions")
+          .select(
+            "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, closing_date, inspection_date, commission, status, created_at, updated_at",
+          )
+          .eq("location_id", LOCATION_ID),
+        client
+          .from("tasks")
+          .select(
+            "id, location_id, transaction_id, title, due_date, status, assigned_to, created_at",
+          )
+          .eq("location_id", LOCATION_ID),
+      ]);
+
+      if (!isMounted) return;
+
+      if (transactionsResult.error || tasksResult.error) {
+        setLoading(false);
+        setError(
+          transactionsResult.error?.message ??
+            tasksResult.error?.message ??
+            "Unable to load CRM data.",
+        );
+        return;
+      }
+
+      setData(
+        mapSupabaseData(
+          transactionsResult.data ?? [],
+          tasksResult.data ?? [],
+        ),
+      );
+      setLoading(false);
+    }
+
+    void loadCrmData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  return useMemo(() => {
+    const totalCommission = data.transactions.reduce(
+      (sum, transaction) => sum + transaction.commission,
+      0,
+    );
+
+    const activeTransactions = data.transactions.filter(
+      (transaction) =>
+        transaction.stage !== "Closed" &&
+        transaction.status.toLowerCase() !== "closed",
+    );
+
+    const stageCounts = data.transactions.reduce<Record<TransactionStage, number>>(
+      (counts, transaction) => ({
+        ...counts,
+        [transaction.stage]: counts[transaction.stage] + 1,
+      }),
+      {
+        Lead: 0,
+        "Under Contract": 0,
+        Inspection: 0,
+        Appraisal: 0,
+        Closing: 0,
+        Closed: 0,
+      },
+    );
+
+    return {
+      ...data,
+      activeTransactions,
+      openTasks: data.tasks.filter((task) => task.status !== "Done"),
+      totalCommission,
+      stageCounts,
+      loading,
+      error,
+    };
+  }, [data, error, loading]);
 }
