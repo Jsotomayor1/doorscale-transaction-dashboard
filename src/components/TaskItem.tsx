@@ -8,11 +8,11 @@ import { type DashboardTask } from "@/hooks/use-crm-data";
 type TaskItemProps = {
   task: DashboardTask;
   onComplete: (taskId: string) => Promise<void>;
-  onUpdateDueDateTime: (
-    taskId: string,
-    dueDate: string,
-    dueTime: string,
-  ) => Promise<void>;
+onUpdateDueDateTime: (input: {
+  taskId: string;
+  dueDate: string;
+  dueTime: string;
+}) => Promise<void>;
   showContext?: boolean;
 };
 
@@ -101,7 +101,11 @@ export function TaskItem({
     setIsSaving(true);
 
     try {
-      await onUpdateDueDateTime(task.id, dueDate, dueTime);
+await onUpdateDueDateTime({
+  taskId: task.id,
+  dueDate,
+  dueTime,
+});
       setIsEditingDueDate(false);
     } catch (error) {
       setTaskError(
