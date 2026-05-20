@@ -37,6 +37,12 @@ export type NewTransactionInput = {
   commission: string;
 };
 
+export type UpdateTransactionStageInput = {
+  transactionId: string;
+  transactionType: string;
+  stage: TransactionStage;
+};
+
 export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done" | string;
 
 export type TransactionTask = {
@@ -135,6 +141,10 @@ type SupabaseTaskTemplate = {
   days_offset: number | null;
   assigned_role: string | null;
   sort_order: number | null;
+};
+
+type SupabaseTaskTitle = {
+  title: string | null;
 };
 
 type CrmDataState = {
@@ -427,6 +437,70 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
   );
 }
 
+async function generateChecklistTasks(
+  client: SupabaseClient,
+  transactionId: string,
+  transactionType: string,
+  stage: TransactionStage,
+) {
+  const { data: templates, error: templateError } = await client
+    .from("task_templates")
+    .select("id, title, days_offset, assigned_role, sort_order")
+    .eq("location_id", LOCATION_ID)
+    .eq("transaction_type", transactionType)
+    .eq("stage", stage)
+    .order("sort_order", { ascending: true });
+
+  if (templateError) {
+    throw new Error(templateError.message);
+  }
+
+  const taskTemplates = (templates ?? []) as SupabaseTaskTemplate[];
+
+  if (!taskTemplates.length) return;
+
+  const { data: existingTasks, error: existingTasksError } = await client
+    .from("tasks")
+    .select("title")
+    .eq("location_id", LOCATION_ID)
+    .eq("transaction_id", transactionId);
+
+  if (existingTasksError) {
+    throw new Error(existingTasksError.message);
+  }
+
+  const existingTitles = new Set(
+    ((existingTasks ?? []) as SupabaseTaskTitle[])
+      .map((task) => task.title?.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const taskRows = taskTemplates
+    .filter((template) => {
+      const title = template.title?.trim().toLowerCase();
+
+      return title ? !existingTitles.has(title) : false;
+    })
+    .map((template) => ({
+      location_id: LOCATION_ID,
+      transaction_id: transactionId,
+      title: template.title ?? "Untitled task",
+      due_date: addDays(new Date(), Number(template.days_offset ?? 0))
+        .toISOString()
+        .slice(0, 10),
+      status: "pending",
+      assigned_to: template.assigned_role || "Agent",
+    }));
+
+  if (!taskRows.length) return;
+
+  const { error: taskInsertError } = await client.from("tasks").insert(taskRows);
+
+  if (taskInsertError) {
+    throw new Error(taskInsertError.message);
+  }
+}
+
 const emptyData: CrmDataState = {
   transactions: [],
   opportunities: [],
@@ -562,41 +636,59 @@ export function useCrmData() {
         throw new Error("Transaction was created, but no id was returned.");
       }
 
-      const { data: templates, error: templateError } = await client
-        .from("task_templates")
-        .select("id, title, days_offset, assigned_role, sort_order")
+      await generateChecklistTasks(
+        client,
+        insertedTransaction.id,
+        input.transactionType,
+        input.stage,
+      );
+
+      await refreshData();
+    },
+    [refreshData],
+  );
+
+  const updateTransactionStage = useCallback(
+    async (input: UpdateTransactionStageInput) => {
+      if (isDemoMode()) {
+        setData((currentData) => ({
+          transactions: currentData.transactions.map((transaction) =>
+            transaction.id === input.transactionId
+              ? { ...transaction, stage: input.stage }
+              : transaction,
+          ),
+          opportunities: currentData.opportunities.map((opportunity) =>
+            String(opportunity.id) === String(input.transactionId)
+              ? { ...opportunity, stage: input.stage }
+              : opportunity,
+          ),
+          tasks: currentData.tasks,
+        }));
+        return;
+      }
+
+      const client = getSupabaseClient();
+
+      if (!client) {
+        throw new Error("Supabase environment variables are not configured.");
+      }
+
+      const { error: updateError } = await client
+        .from("transactions")
+        .update({ stage: input.stage })
         .eq("location_id", LOCATION_ID)
-        .eq("transaction_type", input.transactionType)
-        .eq("stage", input.stage)
-        .order("sort_order", { ascending: true });
+        .eq("id", input.transactionId);
 
-      if (templateError) {
-        throw new Error(templateError.message);
+      if (updateError) {
+        throw new Error(updateError.message);
       }
 
-      const taskTemplates = (templates ?? []) as SupabaseTaskTemplate[];
-
-      if (taskTemplates.length) {
-        const { error: taskInsertError } = await client.from("tasks").insert(
-          taskTemplates.map((template) => ({
-            location_id: LOCATION_ID,
-            transaction_id: insertedTransaction.id,
-            title: template.title ?? "Untitled task",
-            due_date: addDays(
-              new Date(),
-              Number(template.days_offset ?? 0),
-            )
-              .toISOString()
-              .slice(0, 10),
-            status: "pending",
-            assigned_to: template.assigned_role || "Agent",
-          })),
-        );
-
-        if (taskInsertError) {
-          throw new Error(taskInsertError.message);
-        }
-      }
+      await generateChecklistTasks(
+        client,
+        input.transactionId,
+        input.transactionType,
+        input.stage,
+      );
 
       await refreshData();
     },
@@ -646,8 +738,9 @@ export function useCrmData() {
       error,
       refreshData,
       createTransaction,
+      updateTransactionStage,
     };
-  }, [createTransaction, data, error, loading, refreshData]);
+  }, [createTransaction, data, error, loading, refreshData, updateTransactionStage]);
 }
 
 export const useCRMData = useCrmData;

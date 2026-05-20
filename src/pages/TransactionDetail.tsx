@@ -7,6 +7,7 @@ import {
   StickyNote,
   Upload,
 } from "lucide-react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { type TransactionStage, useCRMData } from "@/hooks/use-crm-data";
+import {
+  TRANSACTION_STAGES,
+  type TransactionStage,
+  useCRMData,
+} from "@/hooks/use-crm-data";
 import { formatCurrency } from "@/lib/utils";
 
 const documentRows = [
@@ -75,6 +80,9 @@ function taskVariant(status: string) {
 export default function TransactionDetail() {
   const { id } = useParams();
   const data = useCRMData();
+  const [stageMessage, setStageMessage] = useState("");
+  const [stageError, setStageError] = useState("");
+  const [isUpdatingStage, setIsUpdatingStage] = useState(false);
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -122,11 +130,38 @@ export default function TransactionDetail() {
   }
 
   const fields = transaction.customFields;
+  const transactionId = String(transaction.id);
+  const transactionType = fields.transactionType;
+  const currentStage = transaction.stage;
   const relatedTasks = data.tasks.filter(
     (task) =>
-      String(task.relatedOpportunityId) === String(transaction.id) ||
-      String(task.transactionId) === String(transaction.id),
+      String(task.relatedOpportunityId) === transactionId ||
+      String(task.transactionId) === transactionId,
   );
+
+  async function handleStageChange(stage: TransactionStage) {
+    setStageMessage("");
+    setStageError("");
+
+    if (stage === currentStage) return;
+
+    setIsUpdatingStage(true);
+
+    try {
+      await data.updateTransactionStage({
+        transactionId,
+        transactionType,
+        stage,
+      });
+      setStageMessage("Stage updated and checklist tasks generated.");
+    } catch (error) {
+      setStageError(
+        error instanceof Error ? error.message : "Unable to update stage.",
+      );
+    } finally {
+      setIsUpdatingStage(false);
+    }
+  }
 
   return (
     <div className="dashboard transaction-workspace">
@@ -161,6 +196,40 @@ export default function TransactionDetail() {
           Open in GHL
         </Button>
       </section>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Update Stage</CardTitle>
+            <CardDescription>
+              Moving stages generates any missing checklist tasks for this
+              transaction type.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <label className="stage-update-control">
+            <span>Current Stage</span>
+            <select
+              disabled={isUpdatingStage}
+              onChange={(event) =>
+                void handleStageChange(event.target.value as TransactionStage)
+              }
+              value={currentStage}
+            >
+              {TRANSACTION_STAGES.map((stage) => (
+                <option key={stage} value={stage}>
+                  {stage}
+                </option>
+              ))}
+            </select>
+          </label>
+          {stageMessage ? (
+            <p className="dashboard__success">{stageMessage}</p>
+          ) : null}
+          {stageError ? <p className="dashboard__error">{stageError}</p> : null}
+        </CardContent>
+      </Card>
 
       <section className="summary-grid" aria-label="Transaction summary">
         <Card>
