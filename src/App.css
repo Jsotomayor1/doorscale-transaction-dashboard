@@ -145,6 +145,102 @@
   color: #b91c1c !important;
 }
 
+.transaction-workspace {
+  gap: 18px;
+}
+
+.workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.workspace-header h2 {
+  margin: 4px 0 10px;
+  color: #111827;
+  font-size: clamp(1.8rem, 3.4vw, 2.8rem);
+  line-height: 1.05;
+}
+
+.workspace-header__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #64748b;
+  font-weight: 750;
+}
+
+.workspace-header__meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #eef4f8;
+}
+
+.workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workspace-actions .button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.summary-grid .card__content strong {
+  display: block;
+  color: #17202a;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+}
+
+.placeholder-list {
+  display: grid;
+  gap: 10px;
+}
+
+.placeholder-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #334155;
+  background: #fbfdff;
+  font-weight: 750;
+}
+
+.notes-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 120px;
+  padding: 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  color: #64748b;
+  background: #f8fafc;
+  font-weight: 750;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -588,6 +684,8 @@
 
   .stats-grid,
   .dashboard-grid,
+  .summary-grid,
+  .workspace-grid,
   .entity-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -603,12 +701,18 @@
     display: grid;
   }
 
+  .workspace-header {
+    display: grid;
+  }
+
   .dashboard__header h2 {
     font-size: 2rem;
   }
 
   .stats-grid,
   .dashboard-grid,
+  .summary-grid,
+  .workspace-grid,
   .entity-grid,
   .stage-chart,
   .sidebar__nav {

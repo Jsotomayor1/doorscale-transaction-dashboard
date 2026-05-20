@@ -1,7 +1,15 @@
-import { format } from "date-fns";
-import { ArrowLeft, CalendarClock, CheckSquare } from "lucide-react";
+import { differenceInCalendarDays, format } from "date-fns";
+import {
+  ArrowLeft,
+  CalendarClock,
+  CheckSquare,
+  FileText,
+  StickyNote,
+  Upload,
+} from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -12,6 +20,13 @@ import {
 import { type TransactionStage, useCRMData } from "@/hooks/use-crm-data";
 import { formatCurrency } from "@/lib/utils";
 
+const documentRows = [
+  "Executed Contract",
+  "Inspection Report",
+  "Closing Disclosure",
+  "Commission Documents",
+];
+
 function formatDate(dateValue: string) {
   const date = new Date(dateValue);
 
@@ -20,6 +35,21 @@ function formatDate(dateValue: string) {
   }
 
   return format(date, "MMM d, yyyy");
+}
+
+function getDaysUntilClosing(closingDate: string) {
+  const date = new Date(closingDate);
+
+  if (!closingDate || Number.isNaN(date.getTime())) {
+    return "Not set";
+  }
+
+  const days = differenceInCalendarDays(date, new Date());
+
+  if (days === 0) return "Closing today";
+  if (days < 0) return `${Math.abs(days)} days past closing`;
+
+  return `${days} days`;
 }
 
 function stageVariant(stage: string) {
@@ -99,51 +129,95 @@ export default function TransactionDetail() {
   );
 
   return (
-    <div className="dashboard">
-      <header className="dashboard__header">
+    <div className="dashboard transaction-workspace">
+      <header className="workspace-header">
         <div>
           <Link className="back-link" to="/transactions">
             <ArrowLeft size={16} />
-            Transactions
+            Back to Transactions
           </Link>
-          <p className="dashboard__eyebrow">Transaction record</p>
+          <p className="dashboard__eyebrow">Transaction workspace</p>
           <h2>{fields.propertyAddress || transaction.name}</h2>
-          <p>{fields.transactionType || "Transaction type not set"}</p>
+          <div className="workspace-header__meta">
+            <span>{fields.transactionType || "Transaction type not set"}</span>
+            <span>{transaction.status || "Status not set"}</span>
+          </div>
         </div>
         <Badge variant={stageVariant(transaction.stage)}>
           {transaction.stage as TransactionStage}
         </Badge>
       </header>
 
-      <section className="dashboard-grid">
+      <section className="workspace-actions" aria-label="Transaction actions">
+        <Button disabled>
+          <CheckSquare size={17} />
+          Add Task
+        </Button>
+        <Button disabled variant="secondary">
+          <Upload size={17} />
+          Upload Document
+        </Button>
+        <Button disabled variant="ghost">
+          Open in GHL
+        </Button>
+      </section>
+
+      <section className="summary-grid" aria-label="Transaction summary">
+        <Card>
+          <CardHeader>
+            <CardDescription>Buyer Name</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{fields.buyerName || "Not set"}</strong>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Seller Name</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{fields.sellerName || "Not set"}</strong>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Closing Date</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{formatDate(fields.closingDate)}</strong>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Inspection Date</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{formatDate(fields.inspectionDeadline)}</strong>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Commission</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{formatCurrency(transaction.value)}</strong>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="workspace-grid">
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>Transaction Details</CardTitle>
-              <CardDescription>Supabase transaction fields.</CardDescription>
+              <CardTitle>Important Dates</CardTitle>
+              <CardDescription>Inspection and closing timeline.</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
             <dl className="detail-list">
               <div>
-                <dt>Property Address</dt>
-                <dd>{fields.propertyAddress || transaction.name}</dd>
-              </div>
-              <div>
-                <dt>Transaction Type</dt>
-                <dd>{fields.transactionType || "Not set"}</dd>
-              </div>
-              <div>
-                <dt>Stage</dt>
-                <dd>{transaction.stage || "Not set"}</dd>
-              </div>
-              <div>
-                <dt>Buyer Name</dt>
-                <dd>{fields.buyerName || "Not set"}</dd>
-              </div>
-              <div>
-                <dt>Seller Name</dt>
-                <dd>{fields.sellerName || "Not set"}</dd>
+                <dt>Inspection Date</dt>
+                <dd>{formatDate(fields.inspectionDeadline)}</dd>
               </div>
               <div>
                 <dt>Closing Date</dt>
@@ -153,16 +227,8 @@ export default function TransactionDetail() {
                 </dd>
               </div>
               <div>
-                <dt>Inspection Date</dt>
-                <dd>{formatDate(fields.inspectionDeadline)}</dd>
-              </div>
-              <div>
-                <dt>Commission</dt>
-                <dd>{formatCurrency(transaction.value)}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{transaction.status || "Not set"}</dd>
+                <dt>Days Until Closing</dt>
+                <dd>{getDaysUntilClosing(fields.closingDate)}</dd>
               </div>
             </dl>
           </CardContent>
@@ -171,8 +237,8 @@ export default function TransactionDetail() {
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>Related Tasks</CardTitle>
-              <CardDescription>Tasks tied to this transaction id.</CardDescription>
+              <CardTitle>Tasks / Checklist</CardTitle>
+              <CardDescription>Tasks connected to this transaction.</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
@@ -193,8 +259,45 @@ export default function TransactionDetail() {
                 ))}
               </div>
             ) : (
-              <div className="empty-state">No related tasks found.</div>
+              <div className="empty-state">
+                No tasks connected to this transaction yet.
+              </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Documents</CardTitle>
+              <CardDescription>Document tracking will connect here.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="placeholder-list">
+              {documentRows.map((row) => (
+                <div className="placeholder-row" key={row}>
+                  <FileText size={16} />
+                  <span>{row}</span>
+                  <Badge variant="muted">Pending</Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Notes</CardTitle>
+              <CardDescription>Transaction notes will appear here.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="notes-placeholder">
+              <StickyNote size={20} />
+              Transaction notes will appear here.
+            </div>
           </CardContent>
         </Card>
       </section>
