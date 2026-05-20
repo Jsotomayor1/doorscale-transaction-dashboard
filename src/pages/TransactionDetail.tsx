@@ -22,7 +22,7 @@ function formatDate(dateValue: string) {
   return format(date, "MMM d, yyyy");
 }
 
-function stageVariant(stage: TransactionStage) {
+function stageVariant(stage: string) {
   if (stage === "Clear to Close") return "success";
   if (stage === "Inspections" || stage === "Appraisal") return "warning";
   if (stage === "Closed") return "muted";
@@ -44,10 +44,12 @@ function taskVariant(status: string) {
 
 export default function TransactionDetail() {
   const { id } = useParams();
-  const { error, loading, tasks, transactions } = useCRMData();
-  const transaction = transactions.find((item) => item.id === id);
+  const data = useCRMData();
+  const transaction = data.opportunities.find(
+    (opp) => String(opp.id) === String(id),
+  );
 
-  if (loading) {
+  if (data.loading) {
     return (
       <div className="dashboard">
         <p className="dashboard__status">Loading Supabase data...</p>
@@ -55,10 +57,10 @@ export default function TransactionDetail() {
     );
   }
 
-  if (error) {
+  if (data.error) {
     return (
       <div className="dashboard">
-        <p className="dashboard__error">{error}</p>
+        <p className="dashboard__error">{data.error}</p>
       </div>
     );
   }
@@ -71,16 +73,29 @@ export default function TransactionDetail() {
           Transactions
         </Link>
         <Card>
-          <CardContent className="empty-state">Transaction not found.</CardContent>
+          <CardContent>
+            <div className="empty-state">Transaction not found.</div>
+            <div className="debug-panel">
+              <strong>Debug</strong>
+              <span>URL id: {id ?? "missing"}</span>
+              <span>
+                Available opportunity ids:{" "}
+                {data.opportunities.length
+                  ? data.opportunities.map((opp) => String(opp.id)).join(", ")
+                  : "none"}
+              </span>
+            </div>
+          </CardContent>
         </Card>
       </div>
     );
   }
 
-  const relatedTasks = tasks.filter(
+  const fields = transaction.customFields;
+  const relatedTasks = data.tasks.filter(
     (task) =>
-      task.relatedOpportunityId === transaction.id ||
-      task.transactionId === transaction.id,
+      String(task.relatedOpportunityId) === String(transaction.id) ||
+      String(task.transactionId) === String(transaction.id),
   );
 
   return (
@@ -92,10 +107,12 @@ export default function TransactionDetail() {
             Transactions
           </Link>
           <p className="dashboard__eyebrow">Transaction record</p>
-          <h2>{transaction.propertyAddress}</h2>
-          <p>{transaction.type || "Transaction type not set"}</p>
+          <h2>{fields.propertyAddress || transaction.name}</h2>
+          <p>{fields.transactionType || "Transaction type not set"}</p>
         </div>
-        <Badge variant={stageVariant(transaction.stage)}>{transaction.stage}</Badge>
+        <Badge variant={stageVariant(transaction.stage)}>
+          {transaction.stage as TransactionStage}
+        </Badge>
       </header>
 
       <section className="dashboard-grid">
@@ -110,38 +127,38 @@ export default function TransactionDetail() {
             <dl className="detail-list">
               <div>
                 <dt>Property Address</dt>
-                <dd>{transaction.propertyAddress}</dd>
+                <dd>{fields.propertyAddress || transaction.name}</dd>
               </div>
               <div>
                 <dt>Transaction Type</dt>
-                <dd>{transaction.type || "Not set"}</dd>
+                <dd>{fields.transactionType || "Not set"}</dd>
               </div>
               <div>
                 <dt>Stage</dt>
-                <dd>{transaction.stage}</dd>
+                <dd>{transaction.stage || "Not set"}</dd>
               </div>
               <div>
                 <dt>Buyer Name</dt>
-                <dd>{transaction.buyerName || "Not set"}</dd>
+                <dd>{fields.buyerName || "Not set"}</dd>
               </div>
               <div>
                 <dt>Seller Name</dt>
-                <dd>{transaction.sellerName || "Not set"}</dd>
+                <dd>{fields.sellerName || "Not set"}</dd>
               </div>
               <div>
                 <dt>Closing Date</dt>
                 <dd>
                   <CalendarClock size={15} />
-                  {formatDate(transaction.closeDate)}
+                  {formatDate(fields.closingDate)}
                 </dd>
               </div>
               <div>
                 <dt>Inspection Date</dt>
-                <dd>{formatDate(transaction.inspectionDate)}</dd>
+                <dd>{formatDate(fields.inspectionDeadline)}</dd>
               </div>
               <div>
                 <dt>Commission</dt>
-                <dd>{formatCurrency(transaction.commission)}</dd>
+                <dd>{formatCurrency(transaction.value)}</dd>
               </div>
               <div>
                 <dt>Status</dt>
@@ -155,9 +172,7 @@ export default function TransactionDetail() {
           <CardHeader>
             <div>
               <CardTitle>Related Tasks</CardTitle>
-              <CardDescription>
-                Tasks tied to this transaction id.
-              </CardDescription>
+              <CardDescription>Tasks tied to this transaction id.</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
