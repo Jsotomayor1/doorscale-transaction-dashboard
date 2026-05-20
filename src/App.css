@@ -132,7 +132,8 @@
 }
 
 .dashboard__status,
-.dashboard__error {
+.dashboard__error,
+.dashboard__success {
   margin-top: 10px !important;
   font-weight: 750;
 }
@@ -143,6 +144,120 @@
 
 .dashboard__error {
   color: #b91c1c !important;
+}
+
+.dashboard__success {
+  color: #166534 !important;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.modal {
+  width: min(720px, 100%);
+  max-height: min(88vh, 860px);
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 22px 0;
+}
+
+.modal__header h2 {
+  margin: 4px 0 0;
+  color: #111827;
+  font-size: 1.5rem;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  color: #475569;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  color: #17202a;
+  border-color: #94a3b8;
+}
+
+.transaction-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 22px;
+}
+
+.form-field {
+  display: grid;
+  gap: 7px;
+}
+
+.form-field--full,
+.form-error,
+.modal__actions {
+  grid-column: 1 / -1;
+}
+
+.form-field span {
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.form-field input,
+.form-field select {
+  min-height: 42px;
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #17202a;
+  background: #ffffff;
+}
+
+.form-field input:focus,
+.form-field select:focus {
+  border-color: #1f6f5b;
+  outline: 3px solid rgba(31, 111, 91, 0.15);
+}
+
+.form-error {
+  margin: 0;
+  color: #b91c1c;
+  font-weight: 750;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .transaction-workspace {
@@ -740,6 +855,14 @@
 
   .detail-list dd {
     text-align: left;
+  }
+
+  .transaction-form {
+    grid-template-columns: 1fr;
+  }
+
+  .modal__actions {
+    display: grid;
   }
 
   .stage-chart {

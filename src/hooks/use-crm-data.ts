@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { addDays, subDays } from "date-fns";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const LOCATION_ID = "demo-location";
 
@@ -18,6 +18,24 @@ export const TRANSACTION_STAGES = [
 export type TransactionStage = (typeof TRANSACTION_STAGES)[number];
 
 export type TransactionType = string;
+
+export const TRANSACTION_TYPES = [
+  "Buyer",
+  "Seller",
+  "Buyer/Seller",
+  "Rental",
+] as const;
+
+export type NewTransactionInput = {
+  propertyAddress: string;
+  transactionType: string;
+  stage: TransactionStage;
+  buyerName: string;
+  sellerName: string;
+  closingDate: string;
+  inspectionDate: string;
+  commission: string;
+};
 
 export type TaskStatus = "Open" | "In Progress" | "Blocked" | "Done" | string;
 
@@ -371,6 +389,36 @@ function mapDemoData(): CrmDataState {
   };
 }
 
+async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
+  const [transactionsResult, tasksResult] = await Promise.all([
+    client
+      .from("transactions")
+      .select(
+        "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, closing_date, inspection_date, commission, status, created_at, updated_at",
+      )
+      .eq("location_id", LOCATION_ID),
+    client
+      .from("tasks")
+      .select(
+        "id, location_id, transaction_id, title, due_date, status, assigned_to, created_at",
+      )
+      .eq("location_id", LOCATION_ID),
+  ]);
+
+  if (transactionsResult.error || tasksResult.error) {
+    throw new Error(
+      transactionsResult.error?.message ??
+        tasksResult.error?.message ??
+        "Unable to load CRM data.",
+    );
+  }
+
+  return mapSupabaseData(
+    transactionsResult.data ?? [],
+    tasksResult.data ?? [],
+  );
+}
+
 const emptyData: CrmDataState = {
   transactions: [],
   opportunities: [],
@@ -384,7 +432,7 @@ export function useCrmData() {
   const [loading, setLoading] = useState(!isDemoMode());
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshData = useCallback(async () => {
     if (isDemoMode()) {
       setData(mapDemoData());
       setLoading(false);
@@ -392,63 +440,120 @@ export function useCrmData() {
       return;
     }
 
-    const supabase = getSupabaseClient();
+    const client = getSupabaseClient();
 
-    if (!supabase) {
+    if (!client) {
       setLoading(false);
       setError("Supabase environment variables are not configured.");
       return;
     }
 
-    const client = supabase;
-    let isMounted = true;
+    setLoading(true);
+    setError(null);
 
-    async function loadCrmData() {
-      setLoading(true);
-      setError(null);
+    try {
+      setData(await fetchCrmData(client));
+    } catch (crmError) {
+      setError(
+        crmError instanceof Error ? crmError.message : "Unable to load CRM data.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-      const [transactionsResult, tasksResult] = await Promise.all([
-        client
-          .from("transactions")
-          .select(
-            "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, closing_date, inspection_date, commission, status, created_at, updated_at",
-          )
-          .eq("location_id", LOCATION_ID),
-        client
-          .from("tasks")
-          .select(
-            "id, location_id, transaction_id, title, due_date, status, assigned_to, created_at",
-          )
-          .eq("location_id", LOCATION_ID),
-      ]);
+  const createTransaction = useCallback(
+    async (input: NewTransactionInput) => {
+      if (isDemoMode()) {
+        const createdAt = new Date().toISOString();
+        const commission = Number(input.commission || 0);
+        const demoTransaction: Transaction = {
+          id: `txn-${Date.now()}`,
+          clientName:
+            input.buyerName ||
+            input.sellerName ||
+            input.propertyAddress ||
+            "Unknown Client",
+          propertyAddress: input.propertyAddress,
+          type: input.transactionType,
+          stage: input.stage,
+          closeDate: input.closingDate,
+          inspectionDate: input.inspectionDate,
+          contractValue: commission,
+          commission,
+          status: "active",
+          buyerName: input.buyerName,
+          sellerName: input.sellerName,
+          createdAt,
+          updatedAt: createdAt,
+          tasks: [],
+        };
 
-      if (!isMounted) return;
-
-      if (transactionsResult.error || tasksResult.error) {
-        setLoading(false);
-        setError(
-          transactionsResult.error?.message ??
-            tasksResult.error?.message ??
-            "Unable to load CRM data.",
-        );
+        setData((currentData) => ({
+          transactions: [...currentData.transactions, demoTransaction],
+          opportunities: [
+            ...currentData.opportunities,
+            {
+              id: demoTransaction.id,
+              name: demoTransaction.propertyAddress,
+              contactId: "",
+              pipelineId: "Transaction Management",
+              stage: demoTransaction.stage,
+              status: demoTransaction.status,
+              assignedTo: "",
+              value: demoTransaction.commission,
+              createdAt,
+              updatedAt: createdAt,
+              customFields: {
+                propertyAddress: demoTransaction.propertyAddress,
+                transactionType: demoTransaction.type,
+                closingDate: demoTransaction.closeDate,
+                inspectionDeadline: demoTransaction.inspectionDate,
+                buyerName: demoTransaction.buyerName,
+                sellerName: demoTransaction.sellerName,
+                grossCommission: demoTransaction.commission,
+                netCommission: demoTransaction.commission,
+                agentPayout: demoTransaction.commission,
+                missingDocuments: [],
+              },
+            },
+          ],
+          tasks: currentData.tasks,
+        }));
         return;
       }
 
-      setData(
-        mapSupabaseData(
-          transactionsResult.data ?? [],
-          tasksResult.data ?? [],
-        ),
-      );
-      setLoading(false);
-    }
+      const client = getSupabaseClient();
 
-    void loadCrmData();
+      if (!client) {
+        throw new Error("Supabase environment variables are not configured.");
+      }
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+      const { error: insertError } = await client.from("transactions").insert({
+        location_id: LOCATION_ID,
+        property_address: input.propertyAddress,
+        transaction_type: input.transactionType,
+        stage: input.stage,
+        buyer_name: input.buyerName || null,
+        seller_name: input.sellerName || null,
+        closing_date: input.closingDate || null,
+        inspection_date: input.inspectionDate || null,
+        commission: Number(input.commission || 0),
+        status: "active",
+      });
+
+      if (insertError) {
+        throw new Error(insertError.message);
+      }
+
+      await refreshData();
+    },
+    [refreshData],
+  );
+
+  useEffect(() => {
+    void refreshData();
+  }, [refreshData]);
 
   return useMemo(() => {
     const activeTransactions = data.transactions.filter(
@@ -487,8 +592,10 @@ export function useCrmData() {
       stageCounts,
       loading,
       error,
+      refreshData,
+      createTransaction,
     };
-  }, [data, error, loading]);
+  }, [createTransaction, data, error, loading, refreshData]);
 }
 
 export const useCRMData = useCrmData;

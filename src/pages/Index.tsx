@@ -4,11 +4,15 @@ import {
   CheckCircle2,
   Clock3,
   DollarSign,
+  Plus,
   Workflow,
 } from "lucide-react";
+import { useState } from "react";
+import { NewTransactionModal } from "@/components/NewTransactionModal";
 import { OverviewChart } from "@/components/OverviewChart";
 import { RecentSales } from "@/components/RecentSales";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -48,8 +52,11 @@ function formatDueDate(dueDate: string) {
 }
 
 export default function Index() {
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
   const {
     activeTransactions,
+    createTransaction,
     error,
     loading,
     openTasks,
@@ -71,10 +78,31 @@ export default function Index() {
             Track active contracts, task pressure, deadlines, commissions, and
             workflow stages in one place.
           </p>
+          {successMessage ? (
+            <p className="dashboard__success">{successMessage}</p>
+          ) : null}
           {loading ? <p className="dashboard__status">Loading Supabase data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
+        <Button
+          onClick={() => {
+            setSuccessMessage("");
+            setIsCreateOpen(true);
+          }}
+        >
+          <Plus size={17} />
+          New Transaction
+        </Button>
       </header>
+
+      <NewTransactionModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onCreate={async (input) => {
+          await createTransaction(input);
+          setSuccessMessage("Transaction created successfully.");
+        }}
+      />
 
       <section className="stats-grid" aria-label="Dashboard stats">
         <Card>
