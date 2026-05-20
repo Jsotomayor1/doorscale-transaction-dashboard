@@ -6,7 +6,6 @@ import {
   FileText,
   Pencil,
   StickyNote,
-  Upload,
 } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -30,6 +29,7 @@ import { formatCurrency } from "@/lib/utils";
 
 const documentRows = [
   "Executed Contract",
+  "Flood Disclosure",
   "Inspection Report",
   "Closing Disclosure",
   "Commission Documents",
@@ -191,10 +191,6 @@ export default function TransactionDetail() {
         <Button disabled>
           <CheckSquare size={17} />
           Add Task
-        </Button>
-        <Button disabled variant="secondary">
-          <Upload size={17} />
-          Upload Document
         </Button>
         <Button disabled variant="ghost">
           Open in GHL
@@ -364,16 +360,22 @@ export default function TransactionDetail() {
           <CardHeader>
             <div>
               <CardTitle>Documents</CardTitle>
-              <CardDescription>Document tracking will connect here.</CardDescription>
+              <CardDescription>
+                Coming soon through the DoorScale account connection.
+              </CardDescription>
             </div>
           </CardHeader>
           <CardContent>
+            <p className="documents-helper">
+              Document uploads will connect to the contact's DoorScale document
+              storage once the account connection is enabled.
+            </p>
             <div className="placeholder-list">
               {documentRows.map((row) => (
                 <div className="placeholder-row" key={row}>
                   <FileText size={16} />
                   <span>{row}</span>
-                  <Badge variant="muted">Pending</Badge>
+                  <Badge variant="muted">DoorScale Connection Needed</Badge>
                 </div>
               ))}
             </div>

@@ -356,6 +356,12 @@
   gap: 10px;
 }
 
+.documents-helper {
+  margin: 0 0 14px;
+  color: #64748b;
+  line-height: 1.55;
+}
+
 .placeholder-row {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -365,8 +371,12 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   color: #334155;
-  background: #fbfdff;
+  background: #f8fafc;
   font-weight: 750;
+}
+
+.placeholder-row svg {
+  color: #64748b;
 }
 
 .notes-placeholder {
