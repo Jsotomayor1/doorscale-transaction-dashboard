@@ -9,8 +9,9 @@ type RecentSalesProps = {
 };
 
 function stageVariant(stage: Transaction["stage"]) {
-  if (stage === "Closing") return "success";
-  if (stage === "Inspection" || stage === "Appraisal") return "warning";
+  if (stage === "Clear to Close") return "success";
+  if (stage === "Inspections" || stage === "Appraisal") return "warning";
+  if (stage === "Dead") return "danger";
   return "default";
 }
 

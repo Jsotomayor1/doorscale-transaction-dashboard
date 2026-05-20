@@ -4,13 +4,11 @@ import {
   CheckCircle2,
   Clock3,
   DollarSign,
-  Plus,
   Workflow,
 } from "lucide-react";
 import { OverviewChart } from "@/components/OverviewChart";
 import { RecentSales } from "@/components/RecentSales";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -22,10 +20,31 @@ import { useCrmData } from "@/hooks/use-crm-data";
 import { formatCurrency } from "@/lib/utils";
 
 function taskVariant(status: string) {
-  if (status === "Blocked") return "danger";
-  if (status === "In Progress") return "warning";
-  if (status === "Done") return "success";
+  const normalizedStatus = status.toLowerCase();
+
+  if (normalizedStatus === "blocked") return "danger";
+  if (normalizedStatus === "pending") return "warning";
+  if (normalizedStatus === "completed" || normalizedStatus === "done") {
+    return "success";
+  }
+
   return "muted";
+}
+
+function isDueSoon(dueDate: string) {
+  const date = new Date(dueDate);
+
+  return dueDate ? isBefore(date, startOfTomorrow()) : false;
+}
+
+function formatDueDate(dueDate: string) {
+  const date = new Date(dueDate);
+
+  if (!dueDate || Number.isNaN(date.getTime())) {
+    return "No due date";
+  }
+
+  return format(date, "MMM d");
 }
 
 export default function Index() {
@@ -40,9 +59,7 @@ export default function Index() {
     transactions,
   } = useCrmData();
 
-  const urgentTasks = openTasks.filter((task) =>
-    isBefore(new Date(task.dueDate), startOfTomorrow()),
-  );
+  const urgentTasks = openTasks.filter((task) => isDueSoon(task.dueDate));
 
   return (
     <div className="dashboard">
@@ -57,10 +74,6 @@ export default function Index() {
           {loading ? <p className="dashboard__status">Loading Supabase data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
-        <Button>
-          <Plus size={17} />
-          New Transaction
-        </Button>
       </header>
 
       <section className="stats-grid" aria-label="Dashboard stats">
@@ -100,7 +113,13 @@ export default function Index() {
             <CheckCircle2 size={20} />
           </CardHeader>
           <CardContent>
-            <strong>{tasks.filter((task) => task.status === "Done").length}</strong>
+            <strong>
+              {
+                tasks.filter((task) =>
+                  ["completed", "done"].includes(task.status.toLowerCase()),
+                ).length
+              }
+            </strong>
             <span>completed task checkpoints</span>
           </CardContent>
         </Card>
@@ -139,7 +158,7 @@ export default function Index() {
                   <Badge variant={taskVariant(task.status)}>{task.status}</Badge>
                   <span className="task-row__due">
                     <AlertTriangle size={15} />
-                    {format(new Date(task.dueDate), "MMM d")}
+                    {formatDueDate(task.dueDate)}
                   </span>
                 </article>
               ))}

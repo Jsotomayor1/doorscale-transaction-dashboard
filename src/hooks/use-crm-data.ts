@@ -5,12 +5,14 @@ import { createClient } from "@supabase/supabase-js";
 const LOCATION_ID = "demo-location";
 
 export type TransactionStage =
-  | "Lead"
+  | "Pre-listing"
+  | "Active"
   | "Under Contract"
-  | "Inspection"
+  | "Inspections"
   | "Appraisal"
-  | "Closing"
-  | "Closed";
+  | "Clear to Close"
+  | "Closed"
+  | "Dead";
 
 export type TransactionType = string;
 
@@ -117,7 +119,7 @@ const demoTransactions: Transaction[] = [
     clientName: "Avery Johnson",
     propertyAddress: "1842 Harbor View Dr, Tampa, FL",
     type: "Buyer",
-    stage: "Inspection",
+    stage: "Inspections",
     closeDate: addDays(today, 18).toISOString(),
     contractValue: 645000,
     commission: 19350,
@@ -128,14 +130,14 @@ const demoTransactions: Transaction[] = [
       {
         id: "task-1",
         title: "Confirm inspection repair response",
-        status: "In Progress",
+        status: "pending",
         dueDate: addDays(today, 1).toISOString(),
         owner: "Transaction Coordinator",
       },
       {
         id: "task-2",
         title: "Upload earnest money receipt",
-        status: "Done",
+        status: "completed",
         dueDate: subDays(today, 1).toISOString(),
         owner: "Agent",
       },
@@ -146,7 +148,7 @@ const demoTransactions: Transaction[] = [
     clientName: "Morgan Lee",
     propertyAddress: "921 Cedar Ridge Way, Austin, TX",
     type: "Seller",
-    stage: "Appraisal",
+    stage: "Active",
     closeDate: addDays(today, 27).toISOString(),
     contractValue: 785000,
     commission: 23550,
@@ -157,14 +159,14 @@ const demoTransactions: Transaction[] = [
       {
         id: "task-3",
         title: "Send appraisal access instructions",
-        status: "Open",
+        status: "pending",
         dueDate: addDays(today, 2).toISOString(),
         owner: "Agent",
       },
       {
         id: "task-4",
         title: "Verify payoff statement request",
-        status: "Open",
+        status: "pending",
         dueDate: addDays(today, 5).toISOString(),
         owner: "Closing Team",
       },
@@ -192,15 +194,19 @@ function getSupabaseClient() {
 
 function normalizeStage(stage: string | null): TransactionStage {
   const stageMap: Record<string, TransactionStage> = {
-    lead: "Lead",
+    "pre-listing": "Pre-listing",
+    prelisting: "Pre-listing",
+    active: "Active",
     "under contract": "Under Contract",
-    inspection: "Inspection",
+    inspection: "Inspections",
+    inspections: "Inspections",
     appraisal: "Appraisal",
-    closing: "Closing",
+    "clear to close": "Clear to Close",
     closed: "Closed",
+    dead: "Dead",
   };
 
-  return stageMap[(stage ?? "").toLowerCase()] ?? "Lead";
+  return stageMap[(stage ?? "").toLowerCase()] ?? "Pre-listing";
 }
 
 function getClientName(transaction: SupabaseTransaction) {
@@ -224,7 +230,7 @@ function toOpportunity(
     name: transaction.property_address ?? "Untitled transaction",
     contactId: "",
     pipelineId: "Transaction Management",
-    stage: transaction.stage ?? "Lead",
+    stage: normalizeStage(transaction.stage),
     status: transaction.status ?? "active",
     assignedTo,
     value: commission,
@@ -270,7 +276,7 @@ function mapSupabaseData(
       tasks: relatedTasks.map((task) => ({
         id: task.id,
         title: task.title ?? "Untitled task",
-        status: task.status ?? "Open",
+        status: task.status ?? "pending",
         dueDate: task.due_date ?? "",
         owner: task.assigned_to ?? "",
       })),
@@ -297,7 +303,7 @@ function mapSupabaseData(
         title: task.title ?? "Untitled task",
         dueDate: task.due_date ?? "",
         assignedTo: task.assigned_to ?? "",
-        status: task.status ?? "Open",
+        status: task.status ?? "pending",
         relatedOpportunityId: task.transaction_id ?? "",
         transactionId: task.transaction_id ?? "",
         propertyAddress: transaction?.propertyAddress ?? "",
@@ -430,15 +436,13 @@ export function useCrmData() {
   }, []);
 
   return useMemo(() => {
-    const totalCommission = data.transactions.reduce(
-      (sum, transaction) => sum + transaction.commission,
-      0,
+    const activeTransactions = data.transactions.filter(
+      (transaction) => !["Closed", "Dead"].includes(transaction.stage),
     );
 
-    const activeTransactions = data.transactions.filter(
-      (transaction) =>
-        transaction.stage !== "Closed" &&
-        transaction.status.toLowerCase() !== "closed",
+    const totalCommission = activeTransactions.reduce(
+      (sum, transaction) => sum + transaction.commission,
+      0,
     );
 
     const stageCounts = data.transactions.reduce<Record<TransactionStage, number>>(
@@ -447,19 +451,23 @@ export function useCrmData() {
         [transaction.stage]: counts[transaction.stage] + 1,
       }),
       {
-        Lead: 0,
+        "Pre-listing": 0,
+        Active: 0,
         "Under Contract": 0,
-        Inspection: 0,
+        Inspections: 0,
         Appraisal: 0,
-        Closing: 0,
+        "Clear to Close": 0,
         Closed: 0,
+        Dead: 0,
       },
     );
 
     return {
       ...data,
       activeTransactions,
-      openTasks: data.tasks.filter((task) => task.status !== "Done"),
+      openTasks: data.tasks.filter(
+        (task) => task.status.toLowerCase() === "pending",
+      ),
       totalCommission,
       stageCounts,
       loading,

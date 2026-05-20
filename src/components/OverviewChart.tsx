@@ -1,12 +1,14 @@
 import { type TransactionStage } from "@/hooks/use-crm-data";
 
 const stageOrder: TransactionStage[] = [
-  "Lead",
+  "Pre-listing",
+  "Active",
   "Under Contract",
-  "Inspection",
+  "Inspections",
   "Appraisal",
-  "Closing",
+  "Clear to Close",
   "Closed",
+  "Dead",
 ];
 
 type OverviewChartProps = {
