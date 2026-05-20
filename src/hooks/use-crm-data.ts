@@ -129,6 +129,14 @@ type SupabaseTask = {
   created_at: string | null;
 };
 
+type SupabaseTaskTemplate = {
+  id: string;
+  title: string | null;
+  days_offset: number | null;
+  assigned_role: string | null;
+  sort_order: number | null;
+};
+
 type CrmDataState = {
   transactions: Transaction[];
   opportunities: Opportunity[];
@@ -529,21 +537,65 @@ export function useCrmData() {
         throw new Error("Supabase environment variables are not configured.");
       }
 
-      const { error: insertError } = await client.from("transactions").insert({
-        location_id: LOCATION_ID,
-        property_address: input.propertyAddress,
-        transaction_type: input.transactionType,
-        stage: input.stage,
-        buyer_name: input.buyerName || null,
-        seller_name: input.sellerName || null,
-        closing_date: input.closingDate || null,
-        inspection_date: input.inspectionDate || null,
-        commission: Number(input.commission || 0),
-        status: "active",
-      });
+      const { data: insertedTransaction, error: insertError } = await client
+        .from("transactions")
+        .insert({
+          location_id: LOCATION_ID,
+          property_address: input.propertyAddress,
+          transaction_type: input.transactionType,
+          stage: input.stage,
+          buyer_name: input.buyerName || null,
+          seller_name: input.sellerName || null,
+          closing_date: input.closingDate || null,
+          inspection_date: input.inspectionDate || null,
+          commission: Number(input.commission || 0),
+          status: "active",
+        })
+        .select("id")
+        .single();
 
       if (insertError) {
         throw new Error(insertError.message);
+      }
+
+      if (!insertedTransaction?.id) {
+        throw new Error("Transaction was created, but no id was returned.");
+      }
+
+      const { data: templates, error: templateError } = await client
+        .from("task_templates")
+        .select("id, title, days_offset, assigned_role, sort_order")
+        .eq("location_id", LOCATION_ID)
+        .eq("transaction_type", input.transactionType)
+        .eq("stage", input.stage)
+        .order("sort_order", { ascending: true });
+
+      if (templateError) {
+        throw new Error(templateError.message);
+      }
+
+      const taskTemplates = (templates ?? []) as SupabaseTaskTemplate[];
+
+      if (taskTemplates.length) {
+        const { error: taskInsertError } = await client.from("tasks").insert(
+          taskTemplates.map((template) => ({
+            location_id: LOCATION_ID,
+            transaction_id: insertedTransaction.id,
+            title: template.title ?? "Untitled task",
+            due_date: addDays(
+              new Date(),
+              Number(template.days_offset ?? 0),
+            )
+              .toISOString()
+              .slice(0, 10),
+            status: "pending",
+            assigned_to: template.assigned_role || "Agent",
+          })),
+        );
+
+        if (taskInsertError) {
+          throw new Error(taskInsertError.message);
+        }
       }
 
       await refreshData();
