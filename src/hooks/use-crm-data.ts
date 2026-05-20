@@ -4,15 +4,18 @@ import { createClient } from "@supabase/supabase-js";
 
 const LOCATION_ID = "demo-location";
 
-export type TransactionStage =
-  | "Pre-listing"
-  | "Active"
-  | "Under Contract"
-  | "Inspections"
-  | "Appraisal"
-  | "Clear to Close"
-  | "Closed"
-  | "Dead";
+export const TRANSACTION_STAGES = [
+  "Pre-listing",
+  "Active",
+  "Under Contract",
+  "Inspections",
+  "Appraisal",
+  "Clear to Close",
+  "Closed",
+  "Dead",
+] as const;
+
+export type TransactionStage = (typeof TRANSACTION_STAGES)[number];
 
 export type TransactionType = string;
 
@@ -33,9 +36,12 @@ export type Transaction = {
   type: TransactionType;
   stage: TransactionStage;
   closeDate: string;
+  inspectionDate: string;
   contractValue: number;
   commission: number;
   status: string;
+  buyerName: string;
+  sellerName: string;
   createdAt: string;
   updatedAt: string;
   tasks: TransactionTask[];
@@ -121,9 +127,12 @@ const demoTransactions: Transaction[] = [
     type: "Buyer",
     stage: "Inspections",
     closeDate: addDays(today, 18).toISOString(),
+    inspectionDate: addDays(today, 4).toISOString(),
     contractValue: 645000,
     commission: 19350,
     status: "active",
+    buyerName: "Avery Johnson",
+    sellerName: "",
     createdAt: subDays(today, 12).toISOString(),
     updatedAt: today.toISOString(),
     tasks: [
@@ -150,9 +159,12 @@ const demoTransactions: Transaction[] = [
     type: "Seller",
     stage: "Active",
     closeDate: addDays(today, 27).toISOString(),
+    inspectionDate: addDays(today, 12).toISOString(),
     contractValue: 785000,
     commission: 23550,
     status: "active",
+    buyerName: "",
+    sellerName: "Morgan Lee",
     createdAt: subDays(today, 9).toISOString(),
     updatedAt: today.toISOString(),
     tasks: [
@@ -268,9 +280,12 @@ function mapSupabaseData(
       type: transaction.transaction_type ?? "",
       stage: normalizeStage(transaction.stage),
       closeDate: transaction.closing_date ?? "",
+      inspectionDate: transaction.inspection_date ?? "",
       contractValue: commission,
       commission,
       status: transaction.status ?? "active",
+      buyerName: transaction.buyer_name ?? "",
+      sellerName: transaction.seller_name ?? "",
       createdAt: transaction.created_at ?? "",
       updatedAt: transaction.updated_at ?? transaction.created_at ?? "",
       tasks: relatedTasks.map((task) => ({
@@ -343,9 +358,9 @@ function mapDemoData(): CrmDataState {
         propertyAddress: transaction.propertyAddress,
         transactionType: transaction.type,
         closingDate: transaction.closeDate,
-        inspectionDeadline: "",
-        buyerName: transaction.type === "Buyer" ? transaction.clientName : "",
-        sellerName: transaction.type === "Seller" ? transaction.clientName : "",
+        inspectionDeadline: transaction.inspectionDate,
+        buyerName: transaction.buyerName,
+        sellerName: transaction.sellerName,
         grossCommission: transaction.commission,
         netCommission: transaction.commission,
         agentPayout: transaction.commission,
@@ -475,3 +490,5 @@ export function useCrmData() {
     };
   }, [data, error, loading]);
 }
+
+export const useCRMData = useCrmData;

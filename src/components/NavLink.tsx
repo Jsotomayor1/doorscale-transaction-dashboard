@@ -14,6 +14,7 @@ export function NavLink({ to, icon, children }: NavLinkProps) {
       className={({ isActive }) =>
         cn("sidebar__link", isActive && "sidebar__link--active")
       }
+      end={to === "/"}
       to={to}
     >
       <span className="sidebar__link-icon">{icon}</span>
