@@ -1,3 +1,5 @@
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+
 const AUTH_URL = "https://marketplace.leadconnectorhq.com/oauth/chooselocation";
 const SCOPES = [
   "contacts.readonly",
@@ -11,7 +13,10 @@ const SCOPES = [
   "custom-fields.readonly",
 ].join(" ");
 
-export default function handler(_request, response) {
+export default function handler(
+  _request: VercelRequest,
+  response: VercelResponse,
+) {
   const clientId = process.env.GHL_CLIENT_ID;
   const redirectUri = process.env.GHL_REDIRECT_URI;
 

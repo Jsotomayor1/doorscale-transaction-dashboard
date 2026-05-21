@@ -1,21 +1,45 @@
 import { createClient } from "@supabase/supabase-js";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
 
-function getBaseUrl(request) {
+type GhlTokenResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  locationId?: string;
+  location_id?: string;
+  activeLocation?: string;
+  active_location?: string;
+};
+
+function getBaseUrl(request: VercelRequest) {
   const host = request.headers["x-forwarded-host"] ?? request.headers.host;
   const proto = request.headers["x-forwarded-proto"] ?? "https";
 
   return `${proto}://${host}`;
 }
 
-function redirectWithStatus(request, response, status, message) {
+function redirectWithStatus(
+  request: VercelRequest,
+  response: VercelResponse,
+  status: string,
+  message: string,
+) {
   const redirectUrl = new URL("/", getBaseUrl(request));
   redirectUrl.searchParams.set(status, message);
   response.redirect(302, redirectUrl.toString());
 }
 
-export default async function handler(request, response) {
+export default async function handler(
+  request: VercelRequest,
+  response: VercelResponse,
+) {
+  if (request.query.test) {
+    response.status(200).json({ ok: true, route: "oauth callback working" });
+    return;
+  }
+
   const code = request.query?.code;
   const authorizationCode = Array.isArray(code) ? code[0] : code;
 
@@ -57,7 +81,7 @@ export default async function handler(request, response) {
       return;
     }
 
-    const tokenData = await tokenResponse.json();
+    const tokenData = (await tokenResponse.json()) as GhlTokenResponse;
     const locationId =
       tokenData.locationId ??
       tokenData.location_id ??
@@ -97,7 +121,7 @@ export default async function handler(request, response) {
     const redirectUrl = new URL("/", getBaseUrl(request));
     redirectUrl.searchParams.set("connected", "true");
     response.redirect(302, redirectUrl.toString());
-  } catch (_error) {
+  } catch {
     redirectWithStatus(request, response, "oauth_error", "unexpected_error");
   }
 }
