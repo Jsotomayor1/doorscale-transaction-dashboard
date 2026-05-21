@@ -203,30 +203,11 @@ async function fetchPipelines(accessToken: string, locationId: string) {
   }
 }
 
-function findTransactionPipeline(
-  pipelines: Pipeline[],
-  opportunities: DoorScaleOpportunity[],
-) {
-  const transactionPipeline = pipelines.find(
+function findTransactionManagementSystemPipeline(pipelines: Pipeline[]) {
+  return pipelines.find(
     (pipeline) =>
-      getPipelineName(pipeline)?.trim().toLowerCase() ===
-      "transaction management",
+      getPipelineName(pipeline)?.trim() === "Transaction Management System",
   );
-
-  if (transactionPipeline) {
-    return transactionPipeline;
-  }
-
-  const opportunityPipelineIds = new Set(
-    opportunities
-      .map((opportunity) => opportunity.pipelineId)
-      .filter((pipelineId): pipelineId is string => Boolean(pipelineId)),
-  );
-
-  return pipelines.find((pipeline) => {
-    const pipelineId = getPipelineId(pipeline);
-    return pipelineId ? opportunityPipelineIds.has(pipelineId) : false;
-  });
 }
 
 function stringifyFieldValue(value: unknown) {
@@ -302,8 +283,8 @@ function mapOpportunityToTransaction(
     transaction_type:
       inferTransactionType(opportunity) || existing?.transaction_type || "Seller",
     stage: opportunity.pipelineStageId
-      ? stageMap[opportunity.pipelineStageId] || opportunity.pipelineStageId
-      : "Active",
+      ? stageMap[opportunity.pipelineStageId] || "Unmapped Stage"
+      : "Unmapped Stage",
     buyer_name: existing?.buyer_name ?? null,
     seller_name: getSellerName(opportunity) ?? existing?.seller_name ?? null,
     closing_date: existing?.closing_date ?? null,
@@ -398,18 +379,26 @@ export default async function handler(
   const opportunities = getOpportunities(opportunitiesPayload).filter(
     (opportunity) => Boolean(opportunity.id),
   );
-  const pipelineUsed = findTransactionPipeline(pipelines, opportunities);
+  const pipelineUsed = findTransactionManagementSystemPipeline(pipelines);
+
+  if (!pipelineUsed) {
+    response.status(200).json({
+      ok: false,
+      message: "Transaction Management System pipeline was not found.",
+    });
+    return;
+  }
+
   const pipelineIdUsed = pipelineUsed ? getPipelineId(pipelineUsed) : undefined;
   const pipelineNameUsed = pipelineUsed ? getPipelineName(pipelineUsed) : undefined;
   const stageMap = buildStageMap(pipelineUsed);
-  const mappedStages = Object.keys(stageMap).length;
   const syncableOpportunities = pipelineIdUsed
     ? opportunities.filter(
         (opportunity) => opportunity.pipelineId === pipelineIdUsed,
       )
     : [];
   const skippedOpportunities = opportunities.length - syncableOpportunities.length;
-  const opportunityIds = opportunities
+  const opportunityIds = syncableOpportunities
     .map((opportunity) => opportunity.id)
     .filter((id): id is string => Boolean(id));
 
@@ -421,7 +410,6 @@ export default async function handler(
       syncedTransactions: 0,
       pipelineNameUsed,
       pipelineIdUsed,
-      mappedStages,
       skippedOpportunities,
     });
     return;
@@ -492,7 +480,6 @@ export default async function handler(
       syncedTransactions: syncedTransactions?.length ?? 0,
       pipelineNameUsed,
       pipelineIdUsed,
-      mappedStages,
       skippedOpportunities,
     });
     return;
@@ -505,7 +492,6 @@ export default async function handler(
     syncedTransactions: 0,
     pipelineNameUsed,
     pipelineIdUsed,
-    mappedStages,
     skippedOpportunities,
   });
 }
