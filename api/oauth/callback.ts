@@ -9,17 +9,11 @@ type GhlTokenResponse = {
   expires_in?: number;
   locationId?: string;
   location_id?: string;
-  locationName?: string;
-  location_name?: string;
   activeLocation?: string;
-  active_location?: string;
   companyId?: string;
   company_id?: string;
   userId?: string;
   userType?: string;
-  scope?: string;
-  refreshTokenId?: string;
-  isBulkInstallation?: boolean;
   [key: string]: unknown;
 };
 
@@ -150,11 +144,10 @@ export default async function handler(
     }
 
     const locationId =
-      tokenData.locationId ||
-      tokenData.location_id ||
-      tokenData.activeLocation ||
-      tokenData.companyId ||
-      tokenData.company_id ||
+      tokenData.locationId ??
+      tokenData.location_id ??
+      tokenData.companyId ??
+      tokenData.company_id ??
       tokenData.userId;
 
     if (!locationId) {
@@ -169,41 +162,44 @@ export default async function handler(
       return;
     }
 
-    const expiresInSeconds = Number(tokenData.expires_in ?? 86400);
-    const expiresAt = new Date(
-      Date.now() + expiresInSeconds * 1000,
-    ).toISOString();
+    const payload = {
+      location_id: locationId,
+      location_name: tokenData.userType || "HighLevel Account",
+      access_token: tokenData.access_token,
+      refresh_token: tokenData.refresh_token,
+      expires_at: new Date(
+        Date.now() + Number(tokenData.expires_in || 86400) * 1000,
+      ).toISOString(),
+    };
+
+    console.log("Supabase ghl_locations payload:", {
+      ...payload,
+      access_token: "[redacted]",
+      refresh_token: "[redacted]",
+    });
+
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         persistSession: false,
       },
     });
 
-    const { error } = await supabase.from("ghl_locations").upsert(
-      {
-        location_id: locationId,
-        location_name: tokenData.userType || "HighLevel Account",
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        expires_at: expiresAt,
-        company_id: tokenData.companyId || tokenData.company_id || null,
-        user_id: tokenData.userId || null,
-        user_type: tokenData.userType || null,
-        scope: tokenData.scope || null,
-        refresh_token_id: tokenData.refreshTokenId || null,
-        is_bulk_installation: tokenData.isBulkInstallation || false,
-      },
-      { onConflict: "location_id" },
-    );
+    const { error } = await supabase
+      .from("ghl_locations")
+      .upsert(payload, { onConflict: "location_id" })
+      .select();
 
     if (error) {
-      console.error("GoHighLevel OAuth Supabase token storage error:", error);
-      redirectWithStatus(request, response, "oauth_error", "token_storage_failed");
+      console.error("Supabase ghl_locations upsert error:", error);
+      response.status(500).json({
+        error: "token_storage_failed",
+        supabaseError: error,
+      });
       return;
     }
 
     const redirectUrl = new URL("/", getBaseUrl(request));
-    redirectUrl.searchParams.set("connected", "true");
+    redirectUrl.searchParams.set("oauth_success", "true");
     response.redirect(302, redirectUrl.toString());
   } catch (error) {
     console.error("GoHighLevel OAuth callback unexpected error:", error);
