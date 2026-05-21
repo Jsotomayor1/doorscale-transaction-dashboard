@@ -4,6 +4,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 const OPPORTUNITIES_URL =
   "https://services.leadconnectorhq.com/opportunities/search";
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
+const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
 const API_VERSION = "2021-07-28";
 
 type StoredConnection = {
@@ -15,6 +16,12 @@ type StoredConnection = {
 type OpportunitiesResponse = {
   opportunities?: DoorScaleOpportunity[];
   data?: DoorScaleOpportunity[];
+  [key: string]: unknown;
+};
+
+type TasksResponse = {
+  tasks?: DoorScaleTask[];
+  data?: DoorScaleTask[];
   [key: string]: unknown;
 };
 
@@ -78,10 +85,35 @@ type DoorScaleOpportunity = {
   [key: string]: unknown;
 };
 
+type DoorScaleTask = {
+  id?: string;
+  _id?: string;
+  taskId?: string;
+  title?: string;
+  body?: string;
+  name?: string;
+  dueDate?: string;
+  due_date?: string;
+  dueDatetime?: string;
+  due_datetime?: string;
+  dateAdded?: string;
+  assignedTo?: string;
+  assigned_to?: string;
+  status?: string;
+  completed?: boolean;
+  contactId?: string;
+  contact_id?: string;
+  opportunityId?: string;
+  opportunity_id?: string;
+  ghlOpportunityId?: string;
+  [key: string]: unknown;
+};
+
 type ExistingTransaction = {
   ghl_opportunity_id: string;
   buyer_name: string | null;
   closing_date: string | null;
+  contact_id: string | null;
   inspection_date: string | null;
   seller_name: string | null;
   transaction_type: string | null;
@@ -90,6 +122,7 @@ type ExistingTransaction = {
 type TransactionUpsertPayload = {
   location_id: string;
   ghl_opportunity_id: string;
+  contact_id: string | null;
   property_address: string;
   transaction_type: string;
   stage: string;
@@ -103,21 +136,40 @@ type TransactionUpsertPayload = {
   updated_at: string | null;
 };
 
-function getOpportunityCount(payload: OpportunitiesResponse) {
-  if (Array.isArray(payload.opportunities)) {
-    return payload.opportunities.length;
-  }
+type SyncedTransaction = {
+  contact_id: string | null;
+  ghl_opportunity_id: string | null;
+  id: string;
+};
 
-  if (Array.isArray(payload.data)) {
-    return payload.data.length;
-  }
-
-  return 0;
-}
+type TaskUpsertPayload = {
+  assigned_to: string | null;
+  contact_id: string | null;
+  due_date: string | null;
+  due_datetime: string | null;
+  ghl_opportunity_id: string | null;
+  ghl_task_id: string;
+  location_id: string;
+  status: string;
+  title: string;
+  transaction_id: string;
+};
 
 function getOpportunities(payload: OpportunitiesResponse) {
   if (Array.isArray(payload.opportunities)) {
     return payload.opportunities;
+  }
+
+  if (Array.isArray(payload.data)) {
+    return payload.data;
+  }
+
+  return [];
+}
+
+function getTasks(payload: TasksResponse) {
+  if (Array.isArray(payload.tasks)) {
+    return payload.tasks;
   }
 
   if (Array.isArray(payload.data)) {
@@ -203,6 +255,35 @@ async function fetchPipelines(accessToken: string, locationId: string) {
   }
 }
 
+async function fetchTasks(accessToken: string, locationId: string) {
+  const tasksUrl = `${TASKS_URL_BASE}/${locationId}/tasks/search`;
+
+  try {
+    const tasksResponse = await fetch(tasksUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Version: API_VERSION,
+      },
+      body: JSON.stringify({}),
+    });
+
+    const rawBody = await tasksResponse.text();
+    console.log("DoorScale tasks sync response:", rawBody);
+
+    if (!tasksResponse.ok) {
+      return [];
+    }
+
+    return getTasks(JSON.parse(rawBody) as TasksResponse);
+  } catch (error) {
+    console.error("DoorScale task sync lookup failed:", error);
+    return [];
+  }
+}
+
 function findTransactionManagementSystemPipeline(pipelines: Pipeline[]) {
   return pipelines.find(
     (pipeline) =>
@@ -253,6 +334,52 @@ function toCommission(value: DoorScaleOpportunity["monetaryValue"]) {
   return Number.isFinite(commission) ? commission : 0;
 }
 
+function getTaskId(task: DoorScaleTask) {
+  return task.id ?? task._id ?? task.taskId;
+}
+
+function getTaskTitle(task: DoorScaleTask) {
+  return task.title ?? task.body ?? task.name ?? "Untitled Task";
+}
+
+function getTaskContactId(task: DoorScaleTask) {
+  return task.contactId ?? task.contact_id;
+}
+
+function getTaskOpportunityId(task: DoorScaleTask) {
+  return task.opportunityId ?? task.opportunity_id ?? task.ghlOpportunityId;
+}
+
+function getTaskDueDateTime(task: DoorScaleTask) {
+  return task.dueDatetime ?? task.due_datetime ?? task.dueDate ?? task.due_date ?? null;
+}
+
+function getTaskDueDate(task: DoorScaleTask) {
+  const dueDateTime = getTaskDueDateTime(task);
+
+  if (!dueDateTime) {
+    return null;
+  }
+
+  return dueDateTime.slice(0, 10);
+}
+
+function getTaskStatus(task: DoorScaleTask) {
+  if (task.completed) {
+    return "completed";
+  }
+
+  if (task.status?.toLowerCase() === "completed") {
+    return "completed";
+  }
+
+  return "pending";
+}
+
+function getTaskAssignee(task: DoorScaleTask) {
+  return task.assignedTo ?? task.assigned_to ?? null;
+}
+
 function mapOpportunityStatus(status?: string) {
   switch (status?.toLowerCase()) {
     case "open":
@@ -279,6 +406,7 @@ function mapOpportunityToTransaction(
   return {
     location_id: opportunity.locationId || fallbackLocationId,
     ghl_opportunity_id: opportunity.id,
+    contact_id: opportunity.contactId || existing?.contact_id || null,
     property_address: opportunity.name || "Untitled Transaction",
     transaction_type:
       inferTransactionType(opportunity) || existing?.transaction_type || "Seller",
@@ -294,6 +422,50 @@ function mapOpportunityToTransaction(
     created_at: opportunity.createdAt || null,
     updated_at: opportunity.updatedAt || null,
   };
+}
+
+function mapTaskToPayload(
+  task: DoorScaleTask,
+  fallbackLocationId: string,
+  transactionByOpportunityId: Map<string, SyncedTransaction>,
+  transactionByContactId: Map<string, SyncedTransaction>,
+): TaskUpsertPayload | null {
+  const taskId = getTaskId(task);
+
+  if (!taskId) {
+    return null;
+  }
+
+  const opportunityId = getTaskOpportunityId(task);
+  const contactId = getTaskContactId(task);
+  const matchedTransaction =
+    (opportunityId ? transactionByOpportunityId.get(opportunityId) : undefined) ??
+    (contactId ? transactionByContactId.get(contactId) : undefined);
+
+  if (!matchedTransaction) {
+    return null;
+  }
+
+  const dueDateTime = getTaskDueDateTime(task);
+
+  return {
+    assigned_to: getTaskAssignee(task),
+    contact_id: contactId ?? matchedTransaction.contact_id,
+    due_date: getTaskDueDate(task),
+    due_datetime: dueDateTime,
+    ghl_opportunity_id: opportunityId ?? matchedTransaction.ghl_opportunity_id,
+    ghl_task_id: taskId,
+    location_id: fallbackLocationId,
+    status: getTaskStatus(task),
+    title: getTaskTitle(task),
+    transaction_id: matchedTransaction.id,
+  };
+}
+
+function dedupeTasksByExternalId(tasks: TaskUpsertPayload[]) {
+  return Array.from(
+    new Map(tasks.map((task) => [task.ghl_task_id, task])).values(),
+  );
 }
 
 export default async function handler(
@@ -406,8 +578,9 @@ export default async function handler(
     response.status(200).json({
       ok: true,
       message: "DoorScale data synced successfully.",
-      opportunityCount: getOpportunityCount(opportunitiesPayload),
       syncedTransactions: 0,
+      syncedTasks: 0,
+      skippedTasks: 0,
       pipelineNameUsed,
       pipelineIdUsed,
       skippedOpportunities,
@@ -419,7 +592,7 @@ export default async function handler(
     await supabase
       .from("transactions")
       .select(
-        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date",
+        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id",
       )
       .in("ghl_opportunity_id", opportunityIds);
 
@@ -462,7 +635,7 @@ export default async function handler(
     const { data: syncedTransactions, error: syncError } = await supabase
       .from("transactions")
       .upsert(payload, { onConflict: "ghl_opportunity_id" })
-      .select("id");
+      .select("id, ghl_opportunity_id, contact_id");
 
     if (syncError) {
       console.error("DoorScale transaction sync upsert failed:", syncError);
@@ -473,11 +646,63 @@ export default async function handler(
       return;
     }
 
+    const syncedTransactionRows = (syncedTransactions ?? []) as SyncedTransaction[];
+    const transactionByOpportunityId = new Map(
+      syncedTransactionRows
+        .filter((transaction) => Boolean(transaction.ghl_opportunity_id))
+        .map((transaction) => [
+          transaction.ghl_opportunity_id as string,
+          transaction,
+        ]),
+    );
+    const transactionByContactId = new Map(
+      syncedTransactionRows
+        .filter((transaction) => Boolean(transaction.contact_id))
+        .map((transaction) => [transaction.contact_id as string, transaction]),
+    );
+    const tasks = await fetchTasks(
+      connection.access_token,
+      connection.location_id,
+    );
+    const taskPayload = dedupeTasksByExternalId(
+      tasks
+        .map((task) =>
+          mapTaskToPayload(
+            task,
+            connection.location_id,
+            transactionByOpportunityId,
+            transactionByContactId,
+          ),
+        )
+        .filter((task): task is TaskUpsertPayload => Boolean(task)),
+    );
+    const skippedTasks = tasks.length - taskPayload.length;
+    let syncedTasks = 0;
+
+    if (taskPayload.length) {
+      const { data: syncedTaskRows, error: taskSyncError } = await supabase
+        .from("tasks")
+        .upsert(taskPayload, { onConflict: "ghl_task_id" })
+        .select("id");
+
+      if (taskSyncError) {
+        console.error("DoorScale task sync upsert failed:", taskSyncError);
+        response.status(500).json({
+          ok: false,
+          message: "Unable to sync DoorScale data.",
+        });
+        return;
+      }
+
+      syncedTasks = syncedTaskRows?.length ?? 0;
+    }
+
     response.status(200).json({
       ok: true,
       message: "DoorScale data synced successfully.",
-      opportunityCount: getOpportunityCount(opportunitiesPayload),
       syncedTransactions: syncedTransactions?.length ?? 0,
+      syncedTasks,
+      skippedTasks,
       pipelineNameUsed,
       pipelineIdUsed,
       skippedOpportunities,
@@ -488,8 +713,9 @@ export default async function handler(
   response.status(200).json({
     ok: true,
     message: "DoorScale data synced successfully.",
-    opportunityCount: getOpportunityCount(opportunitiesPayload),
     syncedTransactions: 0,
+    syncedTasks: 0,
+    skippedTasks: 0,
     pipelineNameUsed,
     pipelineIdUsed,
     skippedOpportunities,
