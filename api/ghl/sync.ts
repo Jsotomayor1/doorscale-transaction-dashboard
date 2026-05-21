@@ -12,9 +12,66 @@ type StoredConnection = {
 };
 
 type OpportunitiesResponse = {
-  opportunities?: unknown[];
-  data?: unknown[];
+  opportunities?: DoorScaleOpportunity[];
+  data?: DoorScaleOpportunity[];
   [key: string]: unknown;
+};
+
+type DoorScaleOpportunity = {
+  id?: string;
+  name?: string;
+  monetaryValue?: number | string | null;
+  pipelineId?: string;
+  pipelineStageId?: string;
+  assignedTo?: string;
+  status?: string;
+  source?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  contactId?: string;
+  locationId?: string;
+  contact?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+  };
+  relations?: Array<{
+    contactName?: string;
+  }>;
+  customFields?: Array<{
+    id?: string;
+    key?: string;
+    fieldKey?: string;
+    name?: string;
+    value?: unknown;
+  }>;
+  tags?: unknown;
+  [key: string]: unknown;
+};
+
+type ExistingTransaction = {
+  ghl_opportunity_id: string;
+  buyer_name: string | null;
+  closing_date: string | null;
+  inspection_date: string | null;
+  seller_name: string | null;
+  transaction_type: string | null;
+};
+
+type TransactionUpsertPayload = {
+  location_id: string;
+  ghl_opportunity_id: string;
+  property_address: string;
+  transaction_type: string;
+  stage: string;
+  buyer_name: string | null;
+  seller_name: string | null;
+  closing_date: string | null;
+  inspection_date: string | null;
+  commission: number;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 function getOpportunityCount(payload: OpportunitiesResponse) {
@@ -27,6 +84,88 @@ function getOpportunityCount(payload: OpportunitiesResponse) {
   }
 
   return 0;
+}
+
+function getOpportunities(payload: OpportunitiesResponse) {
+  if (Array.isArray(payload.opportunities)) {
+    return payload.opportunities;
+  }
+
+  if (Array.isArray(payload.data)) {
+    return payload.data;
+  }
+
+  return [];
+}
+
+function stringifyFieldValue(value: unknown) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.join(" ");
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return "";
+}
+
+function inferTransactionType(opportunity: DoorScaleOpportunity) {
+  const sourceText = [
+    stringifyFieldValue(opportunity.tags),
+    ...(opportunity.customFields ?? []).flatMap((field) => [
+      field.key,
+      field.fieldKey,
+      field.name,
+      stringifyFieldValue(field.value),
+    ]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (sourceText.includes("buyer/seller")) return "Buyer/Seller";
+  if (sourceText.includes("rental")) return "Rental";
+  if (sourceText.includes("buyer")) return "Buyer";
+  if (sourceText.includes("seller")) return "Seller";
+
+  return undefined;
+}
+
+function getSellerName(opportunity: DoorScaleOpportunity) {
+  return (
+    opportunity.contact?.name ??
+    opportunity.relations?.[0]?.contactName ??
+    null
+  );
+}
+
+function toCommission(value: DoorScaleOpportunity["monetaryValue"]) {
+  const commission = Number(value ?? 0);
+  return Number.isFinite(commission) ? commission : 0;
+}
+
+function mapOpportunityToTransaction(
+  opportunity: DoorScaleOpportunity,
+  fallbackLocationId: string,
+  existing?: ExistingTransaction,
+): TransactionUpsertPayload | null {
+  if (!opportunity.id) {
+    return null;
+  }
+
+  return {
+    location_id: opportunity.locationId || fallbackLocationId,
+    ghl_opportunity_id: opportunity.id,
+    property_address: opportunity.name || "Untitled Transaction",
+    transaction_type:
+      inferTransactionType(opportunity) || existing?.transaction_type || "Seller",
+    stage: opportunity.pipelineStageId || "Active",
+    buyer_name: existing?.buyer_name ?? null,
+    seller_name: getSellerName(opportunity) ?? existing?.seller_name ?? null,
+    closing_date: existing?.closing_date ?? null,
+    inspection_date: existing?.inspection_date ?? null,
+    commission: toCommission(opportunity.monetaryValue),
+    status: opportunity.status || "active",
+    created_at: opportunity.createdAt || null,
+    updated_at: opportunity.updatedAt || null,
+  };
 }
 
 export default async function handler(
@@ -105,9 +244,93 @@ export default async function handler(
     return;
   }
 
+  const opportunities = getOpportunities(opportunitiesPayload).filter(
+    (opportunity) => Boolean(opportunity.id),
+  );
+  const opportunityIds = opportunities
+    .map((opportunity) => opportunity.id)
+    .filter((id): id is string => Boolean(id));
+
+  if (!opportunityIds.length) {
+    response.status(200).json({
+      ok: true,
+      message: "DoorScale data synced successfully.",
+      opportunityCount: getOpportunityCount(opportunitiesPayload),
+      syncedTransactions: 0,
+    });
+    return;
+  }
+
+  const { data: existingTransactions, error: existingTransactionsError } =
+    await supabase
+      .from("transactions")
+      .select(
+        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date",
+      )
+      .in("ghl_opportunity_id", opportunityIds);
+
+  if (existingTransactionsError) {
+    console.error(
+      "DoorScale sync existing transaction lookup failed:",
+      existingTransactionsError,
+    );
+    response.status(500).json({
+      ok: false,
+      message: "Unable to sync DoorScale data.",
+    });
+    return;
+  }
+
+  const existingByOpportunityId = new Map(
+    ((existingTransactions ?? []) as ExistingTransaction[]).map(
+      (transaction) => [transaction.ghl_opportunity_id, transaction],
+    ),
+  );
+
+  // Requires transactions.ghl_opportunity_id with a unique index so synced
+  // DoorScale opportunities can upsert into stable transaction rows.
+  const payload = opportunities
+    .map((opportunity) =>
+      mapOpportunityToTransaction(
+        opportunity,
+        connection.location_id,
+        opportunity.id
+          ? existingByOpportunityId.get(opportunity.id)
+          : undefined,
+      ),
+    )
+    .filter((transaction): transaction is TransactionUpsertPayload =>
+      Boolean(transaction),
+    );
+
+  if (payload.length) {
+    const { data: syncedTransactions, error: syncError } = await supabase
+      .from("transactions")
+      .upsert(payload, { onConflict: "ghl_opportunity_id" })
+      .select("id");
+
+    if (syncError) {
+      console.error("DoorScale transaction sync upsert failed:", syncError);
+      response.status(500).json({
+        ok: false,
+        message: "Unable to sync DoorScale data.",
+      });
+      return;
+    }
+
+    response.status(200).json({
+      ok: true,
+      message: "DoorScale data synced successfully.",
+      opportunityCount: getOpportunityCount(opportunitiesPayload),
+      syncedTransactions: syncedTransactions?.length ?? 0,
+    });
+    return;
+  }
+
   response.status(200).json({
     ok: true,
     message: "DoorScale data synced successfully.",
     opportunityCount: getOpportunityCount(opportunitiesPayload),
+    syncedTransactions: 0,
   });
 }
