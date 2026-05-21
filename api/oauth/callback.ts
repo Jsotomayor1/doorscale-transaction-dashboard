@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
+const REDIRECT_URI =
+  "https://doorscale-transaction-dashboard.vercel.app/api/oauth/callback";
 
 type GhlTokenResponse = {
   access_token?: string;
@@ -35,8 +37,10 @@ export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
+  console.log("GoHighLevel OAuth callback query:", request.query);
+
   if (request.query.test) {
-    response.status(200).json({ ok: true, route: "oauth callback working" });
+    response.status(200).json({ ok: true });
     return;
   }
 
@@ -44,17 +48,19 @@ export default async function handler(
   const authorizationCode = Array.isArray(code) ? code[0] : code;
 
   if (!authorizationCode) {
-    redirectWithStatus(request, response, "oauth_error", "missing_code");
+    response.status(400).json({
+      error: "missing_code",
+      query: request.query,
+    });
     return;
   }
 
   const clientId = process.env.GHL_CLIENT_ID;
   const clientSecret = process.env.GHL_CLIENT_SECRET;
-  const redirectUri = process.env.GHL_REDIRECT_URI;
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!clientId || !clientSecret || !redirectUri || !supabaseUrl || !serviceRoleKey) {
+  if (!clientId || !clientSecret || !supabaseUrl || !serviceRoleKey) {
     redirectWithStatus(request, response, "oauth_error", "server_not_configured");
     return;
   }
@@ -65,7 +71,7 @@ export default async function handler(
       client_secret: clientSecret,
       grant_type: "authorization_code",
       code: authorizationCode,
-      redirect_uri: redirectUri,
+      redirect_uri: REDIRECT_URI,
     });
 
     const tokenResponse = await fetch(TOKEN_URL, {
