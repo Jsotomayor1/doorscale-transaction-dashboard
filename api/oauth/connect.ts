@@ -5,15 +5,9 @@ const REDIRECT_URI =
   "https://doorscale-transaction-dashboard.vercel.app/api/oauth/callback";
 const STATE = "doorscale_test";
 const SCOPES = [
-  "contacts.readonly",
-  "contacts.write",
-  "opportunities.readonly",
-  "opportunities.write",
-  "tasks.readonly",
-  "tasks.write",
   "locations.readonly",
-  "users.readonly",
-  "custom-fields.readonly",
+  "contacts.readonly",
+  "opportunities.readonly",
 ].join(" ");
 
 export default function handler(
