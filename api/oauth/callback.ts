@@ -15,6 +15,11 @@ type GhlTokenResponse = {
   active_location?: string;
   companyId?: string;
   company_id?: string;
+  userId?: string;
+  userType?: string;
+  scope?: string;
+  refreshTokenId?: string;
+  isBulkInstallation?: boolean;
   [key: string]: unknown;
 };
 
@@ -145,23 +150,15 @@ export default async function handler(
     }
 
     const locationId =
-      tokenData.locationId ??
-      tokenData.location_id ??
-      tokenData.activeLocation ??
-      tokenData.active_location ??
-      tokenData.companyId ??
-      tokenData.company_id ??
-      `debug-location-${Date.now()}`;
-    const locationName =
-      tokenData.locationName ??
-      tokenData.location_name ??
-      (tokenData.name as string | undefined);
+      tokenData.locationId ||
+      tokenData.location_id ||
+      tokenData.activeLocation ||
+      tokenData.companyId ||
+      tokenData.company_id ||
+      tokenData.userId;
 
-    if (!tokenData.locationId && !tokenData.location_id) {
-      console.log(
-        "GoHighLevel OAuth location id missing; using temporary debug fallback:",
-        redactTokens(tokenData),
-      );
+    if (!locationId) {
+      throw new Error("HighLevel token response did not include a location, company, or user id.");
     }
 
     if (!tokenData.access_token || !tokenData.refresh_token) {
@@ -185,15 +182,22 @@ export default async function handler(
     const { error } = await supabase.from("ghl_locations").upsert(
       {
         location_id: locationId,
-        location_name: locationName,
+        location_name: tokenData.userType || "HighLevel Account",
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
         expires_at: expiresAt,
+        company_id: tokenData.companyId || tokenData.company_id || null,
+        user_id: tokenData.userId || null,
+        user_type: tokenData.userType || null,
+        scope: tokenData.scope || null,
+        refresh_token_id: tokenData.refreshTokenId || null,
+        is_bulk_installation: tokenData.isBulkInstallation || false,
       },
       { onConflict: "location_id" },
     );
 
     if (error) {
+      console.error("GoHighLevel OAuth Supabase token storage error:", error);
       redirectWithStatus(request, response, "oauth_error", "token_storage_failed");
       return;
     }
@@ -201,7 +205,8 @@ export default async function handler(
     const redirectUrl = new URL("/", getBaseUrl(request));
     redirectUrl.searchParams.set("connected", "true");
     response.redirect(302, redirectUrl.toString());
-  } catch {
+  } catch (error) {
+    console.error("GoHighLevel OAuth callback unexpected error:", error);
     redirectWithStatus(request, response, "oauth_error", "unexpected_error");
   }
 }
