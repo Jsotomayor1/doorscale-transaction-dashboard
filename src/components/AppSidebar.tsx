@@ -4,11 +4,80 @@ import {
   CircleDollarSign,
   Link as LinkIcon,
   Home,
+  RefreshCw,
   Workflow,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { NavLink } from "@/components/NavLink";
 
 export function AppSidebar() {
+  const [isConnected, setIsConnected] = useState(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function checkStatus() {
+      try {
+        const response = await fetch("/api/ghl/status");
+        const status = (await response.json()) as { connected?: boolean };
+
+        if (isMounted) {
+          setIsConnected(Boolean(status.connected));
+        }
+      } catch {
+        if (isMounted) {
+          setIsConnected(false);
+        }
+      } finally {
+        if (isMounted) {
+          setIsCheckingStatus(false);
+        }
+      }
+    }
+
+    void checkStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function handleConnectionClick() {
+    setSyncMessage("");
+
+    if (!isConnected) {
+      window.location.href = "/api/oauth/connect";
+      return;
+    }
+
+    setIsSyncing(true);
+
+    try {
+      const response = await fetch("/api/ghl/sync", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to sync DoorScale data.");
+      }
+
+      setSyncMessage("DoorScale data synced successfully.");
+    } catch {
+      setSyncMessage("Unable to sync DoorScale data.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  const connectionLabel = isSyncing
+    ? "Syncing..."
+    : isConnected
+      ? "Sync DoorScale Data"
+      : "Connect DoorScale";
+
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -37,12 +106,20 @@ export function AppSidebar() {
       <div className="sidebar__footer">
         <div className="sidebar__footer-copy">
           <BarChart3 size={18} />
-          <span>Live Supabase data ready for transaction operations.</span>
+          <span>DoorScale connection ready for transaction operations.</span>
         </div>
-        <a className="sidebar__connect" href="/api/oauth/connect">
-          <LinkIcon size={16} />
-          Connect DoorScale
-        </a>
+        <button
+          className="sidebar__connect"
+          disabled={isCheckingStatus || isSyncing}
+          onClick={() => void handleConnectionClick()}
+          type="button"
+        >
+          {isConnected ? <RefreshCw size={16} /> : <LinkIcon size={16} />}
+          {connectionLabel}
+        </button>
+        {syncMessage ? (
+          <p className="sidebar__sync-message">{syncMessage}</p>
+        ) : null}
       </div>
     </aside>
   );

@@ -114,14 +114,28 @@
   justify-content: center;
   gap: 8px;
   min-height: 36px;
+  border: 0;
   border-radius: 8px;
   color: #13202f;
   background: #8ed1b2;
   font-weight: 800;
+  cursor: pointer;
 }
 
 .sidebar__connect:hover {
   background: #a8e0c5;
+}
+
+.sidebar__connect:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.sidebar__sync-message {
+  margin: 0;
+  color: #dbeafe;
+  font-size: 0.8rem;
+  font-weight: 650;
 }
 
 .dashboard {

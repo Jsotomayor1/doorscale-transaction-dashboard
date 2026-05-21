@@ -72,8 +72,8 @@ export default function Transactions() {
         <div>
           <p className="dashboard__eyebrow">Pipeline inventory</p>
           <h2>Transactions</h2>
-          <p>Filter every Supabase transaction by DoorScale stage and type.</p>
-          {loading ? <p className="dashboard__status">Loading Supabase data...</p> : null}
+          <p>Filter every DoorScale transaction by stage and type.</p>
+          {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
       </header>

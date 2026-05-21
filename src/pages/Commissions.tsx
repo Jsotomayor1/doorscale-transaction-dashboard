@@ -27,7 +27,7 @@ export default function Commissions() {
           <p className="dashboard__eyebrow">Revenue visibility</p>
           <h2>Commissions</h2>
           <p>Track projected, closed, and inactive commission totals.</p>
-          {loading ? <p className="dashboard__status">Loading Supabase data...</p> : null}
+          {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
       </header>

@@ -84,7 +84,7 @@ export default function TransactionDetail() {
   if (data.loading) {
     return (
       <div className="dashboard">
-        <p className="dashboard__status">Loading Supabase data...</p>
+        <p className="dashboard__status">Loading DoorScale data...</p>
       </div>
     );
   }
@@ -193,7 +193,7 @@ export default function TransactionDetail() {
           Add Task
         </Button>
         <Button disabled variant="ghost">
-          Open in GHL
+          Open in DoorScale
         </Button>
       </section>
 

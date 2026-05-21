@@ -29,8 +29,8 @@ export default function Tasks() {
         <div>
           <p className="dashboard__eyebrow">Task queue</p>
           <h2>Tasks</h2>
-          <p>Review pending and completed task work from Supabase.</p>
-          {loading ? <p className="dashboard__status">Loading Supabase data...</p> : null}
+          <p>Review pending and completed DoorScale task work.</p>
+          {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
       </header>

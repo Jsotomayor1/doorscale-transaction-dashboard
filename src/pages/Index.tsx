@@ -83,7 +83,7 @@ export default function Index() {
           {successMessage ? (
             <p className="dashboard__success">{successMessage}</p>
           ) : null}
-          {loading ? <p className="dashboard__status">Loading Supabase data...</p> : null}
+          {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
         <Button

@@ -452,11 +452,11 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
   ]);
 
   if (transactionsResult.error || tasksResult.error) {
-    throw new Error(
-      transactionsResult.error?.message ??
-        tasksResult.error?.message ??
-        "Unable to load CRM data.",
-    );
+    console.error("DoorScale transaction query failed:", {
+      transactionsError: transactionsResult.error,
+      tasksError: tasksResult.error,
+    });
+    throw new Error("Unable to load transaction data.");
   }
 
   return mapSupabaseData(
@@ -480,7 +480,7 @@ async function generateChecklistTasks(
     .order("sort_order", { ascending: true });
 
   if (templateError) {
-    throw new Error(templateError.message);
+    throw new Error("Unable to generate checklist tasks.");
   }
 
   const taskTemplates = (templates ?? []) as SupabaseTaskTemplate[];
@@ -494,7 +494,7 @@ async function generateChecklistTasks(
     .eq("transaction_id", transactionId);
 
   if (existingTasksError) {
-    throw new Error(existingTasksError.message);
+    throw new Error("Unable to check existing checklist tasks.");
   }
 
   const existingTitles = new Set(
@@ -531,7 +531,7 @@ async function generateChecklistTasks(
   const { error: taskInsertError } = await client.from("tasks").insert(taskRows);
 
   if (taskInsertError) {
-    throw new Error(taskInsertError.message);
+    throw new Error("Unable to create checklist tasks.");
   }
 }
 
@@ -560,7 +560,7 @@ export function useCrmData() {
 
     if (!client) {
       setLoading(false);
-      setError("Supabase environment variables are not configured.");
+      setError("DoorScale connection is not configured.");
       return;
     }
 
@@ -570,9 +570,8 @@ export function useCrmData() {
     try {
       setData(await fetchCrmData(client));
     } catch (crmError) {
-      setError(
-        crmError instanceof Error ? crmError.message : "Unable to load CRM data.",
-      );
+      console.error("DoorScale transaction data load failed:", crmError);
+      setError("Unable to load transaction data.");
     } finally {
       setLoading(false);
     }
@@ -642,7 +641,7 @@ export function useCrmData() {
       const client = getSupabaseClient();
 
       if (!client) {
-        throw new Error("Supabase environment variables are not configured.");
+        throw new Error("DoorScale connection is not configured.");
       }
 
       const { data: insertedTransaction, error: insertError } = await client
@@ -663,7 +662,7 @@ export function useCrmData() {
         .single();
 
       if (insertError) {
-        throw new Error(insertError.message);
+        throw new Error("Unable to create transaction.");
       }
 
       if (!insertedTransaction?.id) {
@@ -704,7 +703,7 @@ export function useCrmData() {
       const client = getSupabaseClient();
 
       if (!client) {
-        throw new Error("Supabase environment variables are not configured.");
+        throw new Error("DoorScale connection is not configured.");
       }
 
       const { error: updateError } = await client
@@ -714,7 +713,7 @@ export function useCrmData() {
         .eq("id", input.transactionId);
 
       if (updateError) {
-        throw new Error(updateError.message);
+        throw new Error("Unable to update stage.");
       }
 
       await generateChecklistTasks(
@@ -790,7 +789,7 @@ export function useCrmData() {
       const client = getSupabaseClient();
 
       if (!client) {
-        throw new Error("Supabase environment variables are not configured.");
+        throw new Error("DoorScale connection is not configured.");
       }
 
       const { error: updateError } = await client
@@ -808,7 +807,7 @@ export function useCrmData() {
         .eq("id", input.transactionId);
 
       if (updateError) {
-        throw new Error(updateError.message);
+        throw new Error("Unable to update transaction.");
       }
 
       await refreshData();
@@ -831,7 +830,7 @@ export function useCrmData() {
       const client = getSupabaseClient();
 
       if (!client) {
-        throw new Error("Supabase environment variables are not configured.");
+        throw new Error("DoorScale connection is not configured.");
       }
 
       const { error: updateError } = await client
@@ -841,7 +840,7 @@ export function useCrmData() {
         .eq("id", taskId);
 
       if (updateError) {
-        throw new Error(updateError.message);
+        throw new Error("Unable to update task.");
       }
 
       await refreshData();
@@ -877,7 +876,7 @@ export function useCrmData() {
       const client = getSupabaseClient();
 
       if (!client) {
-        throw new Error("Supabase environment variables are not configured.");
+        throw new Error("DoorScale connection is not configured.");
       }
 
       const { error: updateError } = await client
@@ -890,7 +889,7 @@ export function useCrmData() {
         .eq("id", taskId);
 
       if (updateError) {
-        throw new Error(updateError.message);
+        throw new Error("Unable to update task.");
       }
 
       await refreshData();
