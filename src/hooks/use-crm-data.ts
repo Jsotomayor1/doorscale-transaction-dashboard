@@ -49,6 +49,14 @@ export type UpdateTaskDueDateTimeInput = {
   dueTime: string;
 };
 
+export type CreateTaskInput = {
+  assignedTo: string;
+  dueDate: string;
+  dueTime: string;
+  title: string;
+  transactionId: string;
+};
+
 export type UpdateTransactionDetailsInput = {
   transactionId: string;
   propertyAddress: string;
@@ -126,6 +134,12 @@ export type DashboardTask = {
   transactionId: string;
   propertyAddress: string;
   clientName: string;
+};
+
+type TaskWriteResponse = {
+  message?: string;
+  ok?: boolean;
+  taskId?: string;
 };
 
 type SupabaseTransaction = {
@@ -541,6 +555,28 @@ const emptyData: CrmDataState = {
   tasks: [],
 };
 
+function getDueDateTime(dueDate: string, dueTime: string) {
+  if (dueDate && dueTime) {
+    return new Date(`${dueDate}T${dueTime}`).toISOString();
+  }
+
+  if (dueDate) {
+    return new Date(`${dueDate}T00:00`).toISOString();
+  }
+
+  return null;
+}
+
+async function parseTaskWriteResponse(response: Response) {
+  const result = (await response.json().catch(() => ({}))) as TaskWriteResponse;
+
+  if (!response.ok) {
+    throw new Error(result.message || "Unable to save task.");
+  }
+
+  return result;
+}
+
 export function useCrmData() {
   const [data, setData] = useState<CrmDataState>(() =>
     isDemoMode() ? mapDemoData() : emptyData,
@@ -815,6 +851,58 @@ export function useCrmData() {
     [refreshData],
   );
 
+  const createTask = useCallback(
+    async (input: CreateTaskInput) => {
+      const dueDateTime = getDueDateTime(input.dueDate, input.dueTime);
+
+      if (isDemoMode()) {
+        const createdTask: DashboardTask = {
+          id: `task-${Date.now()}`,
+          assignedTo: input.assignedTo,
+          clientName: "",
+          dueDate: input.dueDate,
+          dueDateTime: dueDateTime ?? "",
+          propertyAddress: "",
+          relatedOpportunityId: input.transactionId,
+          status: "pending",
+          title: input.title,
+          transactionId: input.transactionId,
+        };
+
+        setData((currentData) => ({
+          ...currentData,
+          tasks: [...currentData.tasks, createdTask],
+        }));
+        return;
+      }
+
+      const response = await fetch("/api/ghl/tasks/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          assignedTo: input.assignedTo,
+          dueDate: input.dueDate || null,
+          dueDateTime,
+          status: "pending",
+          title: input.title,
+          transactionId: input.transactionId,
+        }),
+      });
+      const result = await parseTaskWriteResponse(response);
+
+      await refreshData();
+
+      if (result.ok === false) {
+        throw new Error(
+          result.message || "Task saved locally. DoorScale sync will retry later.",
+        );
+      }
+    },
+    [refreshData],
+  );
+
   const markTaskCompleted = useCallback(
     async (taskId: string) => {
       if (isDemoMode()) {
@@ -827,35 +915,32 @@ export function useCrmData() {
         return;
       }
 
-      const client = getSupabaseClient();
-
-      if (!client) {
-        throw new Error("DoorScale connection is not configured.");
-      }
-
-      const { error: updateError } = await client
-        .from("tasks")
-        .update({ status: "completed" })
-        .eq("location_id", LOCATION_ID)
-        .eq("id", taskId);
-
-      if (updateError) {
-        throw new Error("Unable to update task.");
-      }
+      const response = await fetch("/api/ghl/tasks/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          status: "completed",
+          taskId,
+        }),
+      });
+      const result = await parseTaskWriteResponse(response);
 
       await refreshData();
+
+      if (result.ok === false) {
+        throw new Error(
+          result.message || "Task saved locally. DoorScale sync will retry later.",
+        );
+      }
     },
     [refreshData],
   );
 
   const updateTaskDueDateTime = useCallback(
     async ({ dueDate, dueTime, taskId }: UpdateTaskDueDateTimeInput) => {
-      const dueDateTime =
-        dueDate && dueTime
-          ? new Date(`${dueDate}T${dueTime}`).toISOString()
-          : dueDate
-            ? new Date(`${dueDate}T00:00`).toISOString()
-            : null;
+      const dueDateTime = getDueDateTime(dueDate, dueTime);
 
       if (isDemoMode()) {
         setData((currentData) => ({
@@ -873,26 +958,26 @@ export function useCrmData() {
         return;
       }
 
-      const client = getSupabaseClient();
-
-      if (!client) {
-        throw new Error("DoorScale connection is not configured.");
-      }
-
-      const { error: updateError } = await client
-        .from("tasks")
-        .update({
-          due_date: dueDate || null,
-          due_datetime: dueDateTime,
-        })
-        .eq("location_id", LOCATION_ID)
-        .eq("id", taskId);
-
-      if (updateError) {
-        throw new Error("Unable to update task.");
-      }
+      const response = await fetch("/api/ghl/tasks/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          dueDate: dueDate || null,
+          dueDateTime,
+          taskId,
+        }),
+      });
+      const result = await parseTaskWriteResponse(response);
 
       await refreshData();
+
+      if (result.ok === false) {
+        throw new Error(
+          result.message || "Task saved locally. DoorScale sync will retry later.",
+        );
+      }
     },
     [refreshData],
   );
@@ -949,6 +1034,7 @@ export function useCrmData() {
       loading,
       error,
       refreshData,
+      createTask,
       createTransaction,
       updateTransactionDetails,
       updateTransactionStage,
@@ -956,6 +1042,7 @@ export function useCrmData() {
       updateTaskDueDateTime,
     };
   }, [
+    createTask,
     createTransaction,
     data,
     error,

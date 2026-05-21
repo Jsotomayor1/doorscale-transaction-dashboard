@@ -7,7 +7,7 @@ import {
   Pencil,
   StickyNote,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { EditTransactionModal } from "@/components/EditTransactionModal";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,13 @@ const documentRows = [
   "Closing Disclosure",
   "Commission Documents",
 ];
+
+const initialTaskForm = {
+  assignedTo: "",
+  dueDate: "",
+  dueTime: "",
+  title: "",
+};
 
 function formatDate(dateValue: string) {
   const date = new Date(dateValue);
@@ -75,6 +82,10 @@ export default function TransactionDetail() {
   const [stageError, setStageError] = useState("");
   const [isUpdatingStage, setIsUpdatingStage] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
+  const [isTaskSubmitting, setIsTaskSubmitting] = useState(false);
+  const [taskForm, setTaskForm] = useState(initialTaskForm);
+  const [taskError, setTaskError] = useState("");
   const [detailMessage, setDetailMessage] = useState("");
   const [detailError, setDetailError] = useState("");
   const transaction = data.opportunities.find(
@@ -157,6 +168,44 @@ export default function TransactionDetail() {
     }
   }
 
+  async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTaskError("");
+    setDetailMessage("");
+
+    if (!taskForm.title.trim()) {
+      setTaskError("Task title is required.");
+      return;
+    }
+
+    setIsTaskSubmitting(true);
+
+    try {
+      await data.createTask({
+        assignedTo: taskForm.assignedTo.trim(),
+        dueDate: taskForm.dueDate,
+        dueTime: taskForm.dueTime,
+        title: taskForm.title.trim(),
+        transactionId,
+      });
+      setTaskForm(initialTaskForm);
+      setIsTaskFormOpen(false);
+      setDetailMessage("Task saved.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to save task.";
+      if (message.includes("DoorScale sync will retry later")) {
+        setDetailMessage(message);
+        setTaskForm(initialTaskForm);
+        setIsTaskFormOpen(false);
+      } else {
+        setTaskError(message);
+      }
+    } finally {
+      setIsTaskSubmitting(false);
+    }
+  }
+
   return (
     <div className="dashboard transaction-workspace">
       <header className="workspace-header">
@@ -188,7 +237,12 @@ export default function TransactionDetail() {
           <Pencil size={17} />
           Edit Transaction
         </Button>
-        <Button disabled>
+        <Button
+          onClick={() => {
+            setTaskError("");
+            setIsTaskFormOpen((current) => !current);
+          }}
+        >
           <CheckSquare size={17} />
           Add Task
         </Button>
@@ -201,6 +255,85 @@ export default function TransactionDetail() {
         <p className="dashboard__success">{detailMessage}</p>
       ) : null}
       {detailError ? <p className="dashboard__error">{detailError}</p> : null}
+
+      {isTaskFormOpen ? (
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Add Task</CardTitle>
+              <CardDescription>Create a task for this transaction.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <form className="task-create-form" onSubmit={handleCreateTask}>
+              <label>
+                <span>Task title</span>
+                <input
+                  onChange={(event) =>
+                    setTaskForm((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                  value={taskForm.title}
+                />
+              </label>
+              <label>
+                <span>Due date</span>
+                <input
+                  onChange={(event) =>
+                    setTaskForm((current) => ({
+                      ...current,
+                      dueDate: event.target.value,
+                    }))
+                  }
+                  type="date"
+                  value={taskForm.dueDate}
+                />
+              </label>
+              <label>
+                <span>Due time</span>
+                <input
+                  onChange={(event) =>
+                    setTaskForm((current) => ({
+                      ...current,
+                      dueTime: event.target.value,
+                    }))
+                  }
+                  type="time"
+                  value={taskForm.dueTime}
+                />
+              </label>
+              <label>
+                <span>Assigned to</span>
+                <input
+                  onChange={(event) =>
+                    setTaskForm((current) => ({
+                      ...current,
+                      assignedTo: event.target.value,
+                    }))
+                  }
+                  value={taskForm.assignedTo}
+                />
+              </label>
+              <div className="modal__actions">
+                <Button disabled={isTaskSubmitting} type="submit">
+                  Save Task
+                </Button>
+                <Button
+                  disabled={isTaskSubmitting}
+                  onClick={() => setIsTaskFormOpen(false)}
+                  type="button"
+                  variant="ghost"
+                >
+                  Cancel
+                </Button>
+              </div>
+              {taskError ? <p className="form-error">{taskError}</p> : null}
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <EditTransactionModal
         isOpen={isEditOpen}
