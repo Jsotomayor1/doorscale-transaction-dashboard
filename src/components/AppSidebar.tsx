@@ -2,6 +2,7 @@ import {
   BarChart3,
   CheckSquare,
   CircleDollarSign,
+  Link as LinkIcon,
   Home,
   Workflow,
 } from "lucide-react";
@@ -34,8 +35,14 @@ export function AppSidebar() {
       </nav>
 
       <div className="sidebar__footer">
-        <BarChart3 size={18} />
-        <span>Live Supabase data ready for transaction operations.</span>
+        <div className="sidebar__footer-copy">
+          <BarChart3 size={18} />
+          <span>Live Supabase data ready for transaction operations.</span>
+        </div>
+        <a className="sidebar__connect" href="/api/oauth/connect">
+          <LinkIcon size={16} />
+          Connect DoorScale
+        </a>
       </div>
     </aside>
   );
