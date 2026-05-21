@@ -12,7 +12,7 @@ const STATUS_OPTIONS = ["active", "closed", "dead"] as const;
 type EditTransactionModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (input: UpdateTransactionDetailsInput) => Promise<void>;
+  onSave: (input: UpdateTransactionDetailsInput) => Promise<string | void>;
   transaction: Opportunity;
 };
 

@@ -21,7 +21,7 @@ const initialForm: NewTransactionInput = {
 type NewTransactionModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (input: NewTransactionInput) => Promise<void>;
+  onCreate: (input: NewTransactionInput) => Promise<string | void>;
 };
 
 export function NewTransactionModal({

@@ -142,6 +142,12 @@ type TaskWriteResponse = {
   taskId?: string;
 };
 
+type TransactionWriteResponse = {
+  message?: string;
+  ok?: boolean;
+  transactionId?: string;
+};
+
 type SupabaseTransaction = {
   id: string;
   location_id: string;
@@ -577,6 +583,16 @@ async function parseTaskWriteResponse(response: Response) {
   return result;
 }
 
+async function parseTransactionWriteResponse(response: Response) {
+  const result = (await response.json().catch(() => ({}))) as TransactionWriteResponse;
+
+  if (!response.ok) {
+    throw new Error(result.message || "Unable to save transaction.");
+  }
+
+  return result;
+}
+
 export function useCrmData() {
   const [data, setData] = useState<CrmDataState>(() =>
     isDemoMode() ? mapDemoData() : emptyData,
@@ -680,39 +696,34 @@ export function useCrmData() {
         throw new Error("DoorScale connection is not configured.");
       }
 
-      const { data: insertedTransaction, error: insertError } = await client
-        .from("transactions")
-        .insert({
-          location_id: LOCATION_ID,
-          property_address: input.propertyAddress,
-          transaction_type: input.transactionType,
-          stage: input.stage,
-          buyer_name: input.buyerName || null,
-          seller_name: input.sellerName || null,
-          closing_date: input.closingDate || null,
-          inspection_date: input.inspectionDate || null,
-          commission: Number(input.commission || 0),
+      const response = await fetch("/api/ghl/transactions/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...input,
           status: "active",
-        })
-        .select("id")
-        .single();
+        }),
+      });
+      const result = await parseTransactionWriteResponse(response);
 
-      if (insertError) {
-        throw new Error("Unable to create transaction.");
-      }
-
-      if (!insertedTransaction?.id) {
+      if (!result.transactionId) {
         throw new Error("Transaction was created, but no id was returned.");
       }
 
       await generateChecklistTasks(
         client,
-        insertedTransaction.id,
+        result.transactionId,
         input.transactionType,
         input.stage,
       );
 
       await refreshData();
+
+      return result.ok === false
+        ? result.message || "Transaction saved locally. DoorScale sync will retry later."
+        : undefined;
     },
     [refreshData],
   );
@@ -742,15 +753,17 @@ export function useCrmData() {
         throw new Error("DoorScale connection is not configured.");
       }
 
-      const { error: updateError } = await client
-        .from("transactions")
-        .update({ stage: input.stage })
-        .eq("location_id", LOCATION_ID)
-        .eq("id", input.transactionId);
-
-      if (updateError) {
-        throw new Error("Unable to update stage.");
-      }
+      const response = await fetch("/api/ghl/transactions/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          stage: input.stage,
+          transactionId: input.transactionId,
+        }),
+      });
+      const result = await parseTransactionWriteResponse(response);
 
       await generateChecklistTasks(
         client,
@@ -760,6 +773,10 @@ export function useCrmData() {
       );
 
       await refreshData();
+
+      return result.ok === false
+        ? result.message || "Transaction saved locally. DoorScale sync will retry later."
+        : undefined;
     },
     [refreshData],
   );
@@ -828,25 +845,20 @@ export function useCrmData() {
         throw new Error("DoorScale connection is not configured.");
       }
 
-      const { error: updateError } = await client
-        .from("transactions")
-        .update({
-          property_address: input.propertyAddress,
-          transaction_type: input.transactionType,
-          buyer_name: input.buyerName || null,
-          seller_name: input.sellerName || null,
-          closing_date: input.closingDate || null,
-          inspection_date: input.inspectionDate || null,
-          commission,
-          status: input.status,
-        })
-        .eq("id", input.transactionId);
-
-      if (updateError) {
-        throw new Error("Unable to update transaction.");
-      }
+      const response = await fetch("/api/ghl/transactions/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(input),
+      });
+      const result = await parseTransactionWriteResponse(response);
 
       await refreshData();
+
+      return result.ok === false
+        ? result.message || "Transaction saved locally. DoorScale sync will retry later."
+        : undefined;
     },
     [refreshData],
   );

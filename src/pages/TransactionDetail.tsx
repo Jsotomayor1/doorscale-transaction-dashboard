@@ -153,12 +153,12 @@ export default function TransactionDetail() {
     setIsUpdatingStage(true);
 
     try {
-      await data.updateTransactionStage({
+      const message = await data.updateTransactionStage({
         transactionId,
         transactionType,
         stage,
       });
-      setStageMessage("Stage updated and checklist tasks generated.");
+      setStageMessage(message || "Stage updated and checklist tasks generated.");
     } catch (error) {
       setStageError(
         error instanceof Error ? error.message : "Unable to update stage.",
@@ -342,8 +342,8 @@ export default function TransactionDetail() {
           setDetailMessage("");
           setDetailError("");
           try {
-            await data.updateTransactionDetails(input);
-            setDetailMessage("Transaction details updated.");
+            const message = await data.updateTransactionDetails(input);
+            setDetailMessage(message || "Transaction details updated.");
           } catch (error) {
             setDetailError(
               error instanceof Error

@@ -101,8 +101,8 @@ export default function Index() {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onCreate={async (input) => {
-          await createTransaction(input);
-          setSuccessMessage("Transaction created successfully.");
+          const message = await createTransaction(input);
+          setSuccessMessage(message || "Transaction created successfully.");
         }}
       />
 
