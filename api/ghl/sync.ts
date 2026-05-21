@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const OPPORTUNITIES_URL =
   "https://services.leadconnectorhq.com/opportunities/search";
+const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
 const API_VERSION = "2021-07-28";
 
 type StoredConnection = {
@@ -14,6 +15,31 @@ type StoredConnection = {
 type OpportunitiesResponse = {
   opportunities?: DoorScaleOpportunity[];
   data?: DoorScaleOpportunity[];
+  [key: string]: unknown;
+};
+
+type PipelineStage = {
+  id?: string;
+  _id?: string;
+  stageId?: string;
+  name?: string;
+  title?: string;
+  label?: string;
+  stageName?: string;
+  [key: string]: unknown;
+};
+
+type Pipeline = {
+  id?: string;
+  name?: string;
+  stages?: PipelineStage[];
+  pipelineStages?: PipelineStage[];
+  [key: string]: unknown;
+};
+
+type PipelinesResponse = {
+  pipelines?: Pipeline[];
+  data?: Pipeline[];
   [key: string]: unknown;
 };
 
@@ -98,6 +124,72 @@ function getOpportunities(payload: OpportunitiesResponse) {
   return [];
 }
 
+function getPipelines(payload: PipelinesResponse) {
+  if (Array.isArray(payload.pipelines)) {
+    return payload.pipelines;
+  }
+
+  if (Array.isArray(payload.data)) {
+    return payload.data;
+  }
+
+  return [];
+}
+
+function getStageId(stage: PipelineStage) {
+  return stage.id ?? stage._id ?? stage.stageId;
+}
+
+function getStageName(stage: PipelineStage) {
+  return stage.name ?? stage.title ?? stage.label ?? stage.stageName;
+}
+
+function buildStageMap(payload: PipelinesResponse) {
+  const stageMap: Record<string, string> = {};
+
+  for (const pipeline of getPipelines(payload)) {
+    const stages = pipeline.stages ?? pipeline.pipelineStages ?? [];
+
+    for (const stage of stages) {
+      const stageId = getStageId(stage);
+      const stageName = getStageName(stage);
+
+      if (stageId && stageName) {
+        stageMap[stageId] = stageName;
+      }
+    }
+  }
+
+  return stageMap;
+}
+
+async function fetchStageMap(accessToken: string, locationId: string) {
+  const pipelinesUrl = new URL(PIPELINES_URL);
+  pipelinesUrl.searchParams.set("locationId", locationId);
+
+  try {
+    const pipelinesResponse = await fetch(pipelinesUrl, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        Version: API_VERSION,
+      },
+    });
+
+    const rawBody = await pipelinesResponse.text();
+    console.log("DoorScale pipeline stages sync response:", rawBody);
+
+    if (!pipelinesResponse.ok) {
+      return {};
+    }
+
+    return buildStageMap(JSON.parse(rawBody) as PipelinesResponse);
+  } catch (error) {
+    console.error("DoorScale stage mapping lookup failed:", error);
+    return {};
+  }
+}
+
 function stringifyFieldValue(value: unknown) {
   if (typeof value === "string") return value;
   if (typeof value === "number") return String(value);
@@ -144,6 +236,7 @@ function toCommission(value: DoorScaleOpportunity["monetaryValue"]) {
 function mapOpportunityToTransaction(
   opportunity: DoorScaleOpportunity,
   fallbackLocationId: string,
+  stageMap: Record<string, string>,
   existing?: ExistingTransaction,
 ): TransactionUpsertPayload | null {
   if (!opportunity.id) {
@@ -156,7 +249,9 @@ function mapOpportunityToTransaction(
     property_address: opportunity.name || "Untitled Transaction",
     transaction_type:
       inferTransactionType(opportunity) || existing?.transaction_type || "Seller",
-    stage: opportunity.pipelineStageId || "Active",
+    stage: opportunity.pipelineStageId
+      ? stageMap[opportunity.pipelineStageId] || opportunity.pipelineStageId
+      : "Active",
     buyer_name: existing?.buyer_name ?? null,
     seller_name: getSellerName(opportunity) ?? existing?.seller_name ?? null,
     closing_date: existing?.closing_date ?? null,
@@ -217,6 +312,12 @@ export default async function handler(
   const opportunitiesUrl = new URL(OPPORTUNITIES_URL);
   opportunitiesUrl.searchParams.set("location_id", connection.location_id);
 
+  const stageMap = await fetchStageMap(
+    connection.access_token,
+    connection.location_id,
+  );
+  const mappedStages = Object.keys(stageMap).length;
+
   const opportunitiesResponse = await fetch(opportunitiesUrl, {
     headers: {
       Accept: "application/json",
@@ -257,6 +358,7 @@ export default async function handler(
       message: "DoorScale data synced successfully.",
       opportunityCount: getOpportunityCount(opportunitiesPayload),
       syncedTransactions: 0,
+      mappedStages,
     });
     return;
   }
@@ -294,6 +396,7 @@ export default async function handler(
       mapOpportunityToTransaction(
         opportunity,
         connection.location_id,
+        stageMap,
         opportunity.id
           ? existingByOpportunityId.get(opportunity.id)
           : undefined,
@@ -323,6 +426,7 @@ export default async function handler(
       message: "DoorScale data synced successfully.",
       opportunityCount: getOpportunityCount(opportunitiesPayload),
       syncedTransactions: syncedTransactions?.length ?? 0,
+      mappedStages,
     });
     return;
   }
@@ -332,5 +436,6 @@ export default async function handler(
     message: "DoorScale data synced successfully.",
     opportunityCount: getOpportunityCount(opportunitiesPayload),
     syncedTransactions: 0,
+    mappedStages,
   });
 }
