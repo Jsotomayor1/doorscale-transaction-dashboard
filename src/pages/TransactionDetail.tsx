@@ -87,6 +87,22 @@ function getSyncVariant(syncStatus = "synced") {
   return "success";
 }
 
+function documentStatusVariant(status: string) {
+  const normalizedStatus = status.toLowerCase();
+
+  if (normalizedStatus === "uploaded") return "success";
+  if (normalizedStatus === "missing") return "danger";
+  return "warning";
+}
+
+function normalizeDocumentStatus(status = "Needed") {
+  const normalizedStatus = status.toLowerCase();
+
+  if (normalizedStatus === "uploaded") return "Uploaded";
+  if (normalizedStatus === "missing") return "Missing";
+  return "Needed";
+}
+
 export default function TransactionDetail() {
   const { id } = useParams();
   const data = useCRMData();
@@ -156,6 +172,15 @@ export default function TransactionDetail() {
       String(task.relatedOpportunityId) === transactionId ||
       String(task.transactionId) === transactionId,
   );
+  const documentsByType = new Map(
+    data.documents
+      .filter((document) => document.transactionId === transactionId)
+      .map((document) => [document.documentType, document]),
+  );
+  const documentTrackingRows = documentRows.map((documentType) => ({
+    documentType,
+    document: documentsByType.get(documentType),
+  }));
 
   async function handleStageChange(stage: TransactionStage) {
     setStageMessage("");
@@ -601,15 +626,31 @@ export default function TransactionDetail() {
           </CardHeader>
           <CardContent>
             <p className="documents-helper">
-              Document uploads will connect to the contact's DoorScale document
-              storage once the account connection is enabled.
+              Document uploads will connect to DoorScale contact records in a
+              future release.
             </p>
+            <Button disabled variant="secondary">
+              Connect document storage
+            </Button>
             <div className="placeholder-list">
-              {documentRows.map((row) => (
-                <div className="placeholder-row" key={row}>
+              {documentTrackingRows.map(({ document, documentType }) => (
+                <div className="placeholder-row" key={documentType}>
                   <FileText size={16} />
-                  <span>{row}</span>
-                  <Badge variant="muted">DoorScale Connection Needed</Badge>
+                  <div>
+                    <span>{document?.documentName || documentType}</span>
+                    <small>
+                      {document?.uploadedAt
+                        ? `Uploaded ${formatDate(document.uploadedAt)}`
+                        : "No upload date"}
+                    </small>
+                  </div>
+                  <Badge
+                    variant={documentStatusVariant(
+                      document?.status || "Needed",
+                    )}
+                  >
+                    {normalizeDocumentStatus(document?.status)}
+                  </Badge>
                 </div>
               ))}
             </div>

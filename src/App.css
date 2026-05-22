@@ -421,6 +421,7 @@
 .placeholder-list {
   display: grid;
   gap: 10px;
+  margin-top: 14px;
 }
 
 .documents-helper {
@@ -444,6 +445,17 @@
 
 .placeholder-row svg {
   color: #64748b;
+}
+
+.placeholder-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.placeholder-row small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 650;
 }
 
 .notes-placeholder {

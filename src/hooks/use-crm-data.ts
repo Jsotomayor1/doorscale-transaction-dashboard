@@ -156,6 +156,18 @@ export type DashboardTask = {
   ghlTaskId?: string;
 };
 
+export type TransactionDocument = {
+  id: string;
+  transactionId: string;
+  documentType: string;
+  documentName: string;
+  doorScaleFileId: string;
+  doorScaleContactId: string;
+  status: string;
+  uploadedAt: string;
+  createdAt: string;
+};
+
 type TaskWriteResponse = {
   message?: string;
   ok?: boolean;
@@ -208,6 +220,18 @@ type SupabaseTask = {
   created_at: string | null;
 };
 
+type SupabaseTransactionDocument = {
+  id: string;
+  transaction_id: string | null;
+  document_type: string | null;
+  document_name: string | null;
+  doorscale_file_id: string | null;
+  doorscale_contact_id: string | null;
+  status: string | null;
+  uploaded_at: string | null;
+  created_at: string | null;
+};
+
 type SupabaseTaskTemplate = {
   id: string;
   title: string | null;
@@ -224,6 +248,7 @@ type CrmDataState = {
   transactions: Transaction[];
   opportunities: Opportunity[];
   tasks: DashboardTask[];
+  documents: TransactionDocument[];
 };
 
 const today = new Date();
@@ -387,6 +412,7 @@ function toOpportunity(
 function mapSupabaseData(
   supabaseTransactions: SupabaseTransaction[],
   supabaseTasks: SupabaseTask[],
+  supabaseDocuments: SupabaseTransactionDocument[],
 ): CrmDataState {
   const transactions = supabaseTransactions.map<Transaction>((transaction) => {
     const relatedTasks = supabaseTasks.filter(
@@ -460,6 +486,17 @@ function mapSupabaseData(
         ghlTaskId: task.ghl_task_id ?? "",
       };
     }),
+    documents: supabaseDocuments.map((document) => ({
+      id: document.id,
+      transactionId: document.transaction_id ?? "",
+      documentType: document.document_type ?? "",
+      documentName: document.document_name ?? "",
+      doorScaleFileId: document.doorscale_file_id ?? "",
+      doorScaleContactId: document.doorscale_contact_id ?? "",
+      status: document.status ?? "Needed",
+      uploadedAt: document.uploaded_at ?? "",
+      createdAt: document.created_at ?? "",
+    })),
   };
 }
 
@@ -504,11 +541,12 @@ function mapDemoData(): CrmDataState {
       },
     })),
     tasks,
+    documents: [],
   };
 }
 
 async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
-  const [transactionsResult, tasksResult] = await Promise.all([
+  const [transactionsResult, tasksResult, documentsResult] = await Promise.all([
     client
       .from("transactions")
       .select(
@@ -521,12 +559,19 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
         "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
       )
       .eq("location_id", LOCATION_ID),
+    client
+      .from("transaction_documents")
+      .select(
+        "id, transaction_id, document_type, document_name, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at",
+      )
+      .eq("location_id", LOCATION_ID),
   ]);
 
-  if (transactionsResult.error || tasksResult.error) {
+  if (transactionsResult.error || tasksResult.error || documentsResult.error) {
     console.error("DoorScale transaction query failed:", {
       transactionsError: transactionsResult.error,
       tasksError: tasksResult.error,
+      documentsError: documentsResult.error,
     });
     throw new Error("Unable to load transaction data.");
   }
@@ -534,6 +579,7 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
   return mapSupabaseData(
     transactionsResult.data ?? [],
     tasksResult.data ?? [],
+    documentsResult.data ?? [],
   );
 }
 
@@ -611,6 +657,7 @@ const emptyData: CrmDataState = {
   transactions: [],
   opportunities: [],
   tasks: [],
+  documents: [],
 };
 
 function getDueDateTime(dueDate: string, dueTime: string) {
@@ -738,6 +785,7 @@ export function useCrmData() {
             },
           ],
           tasks: currentData.tasks,
+          documents: currentData.documents,
         }));
         return;
       }
@@ -795,6 +843,7 @@ export function useCrmData() {
               : opportunity,
           ),
           tasks: currentData.tasks,
+          documents: currentData.documents,
         }));
         return;
       }
@@ -887,6 +936,7 @@ export function useCrmData() {
               : opportunity,
           ),
           tasks: currentData.tasks,
+          documents: currentData.documents,
         }));
         return;
       }
