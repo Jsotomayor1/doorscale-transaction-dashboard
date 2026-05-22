@@ -169,6 +169,7 @@ export default async function handler(
     auth: { persistSession: false },
   });
   let opportunityId: string | undefined;
+  let linkedLocationId: string | null = null;
   let writeBackFailed = false;
 
   try {
@@ -178,6 +179,7 @@ export default async function handler(
       throw new Error("DoorScale account is not connected.");
     }
 
+    linkedLocationId = connectedAccount.location_id;
     const { pipelineId, stageMap } = await getPipelineConfig(
       connectedAccount.access_token,
       connectedAccount.location_id,
@@ -225,6 +227,8 @@ export default async function handler(
     buyer_name: body.buyerName || null,
     closing_date: body.closingDate || null,
     commission: Number(body.commission || 0),
+    ghl_contact_id: null,
+    ghl_location_id: linkedLocationId,
     ghl_opportunity_id: opportunityId ?? null,
     inspection_date: body.inspectionDate || null,
     location_id: "demo-location",

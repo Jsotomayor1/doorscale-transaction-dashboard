@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CalendarClock,
   CheckSquare,
+  ExternalLink,
   FileText,
   Pencil,
   StickyNote,
@@ -111,6 +112,18 @@ function formatDocumentStatus(status = "Needed") {
   return "Needed";
 }
 
+function buildContactLink(locationId?: string, contactId?: string) {
+  if (!locationId || !contactId) return "";
+
+  return `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${contactId}`;
+}
+
+function buildOpportunityLink(locationId?: string, opportunityId?: string) {
+  if (!locationId || !opportunityId) return "";
+
+  return `https://app.gohighlevel.com/v2/location/${locationId}/opportunities/detail/${opportunityId}`;
+}
+
 export default function TransactionDetail() {
   const { id } = useParams();
   const data = useCRMData();
@@ -175,6 +188,14 @@ export default function TransactionDetail() {
   const transactionId = String(transaction.id);
   const transactionType = fields.transactionType;
   const currentStage = transaction.stage;
+  const contactLink = buildContactLink(
+    transaction.ghlLocationId,
+    transaction.ghlContactId || transaction.contactId,
+  );
+  const opportunityLink = buildOpportunityLink(
+    transaction.ghlLocationId,
+    transaction.ghlOpportunityId,
+  );
   const relatedTasks = data.tasks.filter(
     (task) =>
       String(task.relatedOpportunityId) === transactionId ||
@@ -336,9 +357,38 @@ export default function TransactionDetail() {
           <CheckSquare size={17} />
           Add Task
         </Button>
-        <Button disabled variant="ghost">
-          Open in DoorScale
-        </Button>
+        {contactLink ? (
+          <a
+            className="button button--secondary"
+            href={contactLink}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ExternalLink size={17} />
+            Open Contact
+          </a>
+        ) : (
+          <Button disabled variant="secondary">
+            <ExternalLink size={17} />
+            Open Contact
+          </Button>
+        )}
+        {opportunityLink ? (
+          <a
+            className="button button--secondary"
+            href={opportunityLink}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ExternalLink size={17} />
+            Open Opportunity
+          </a>
+        ) : (
+          <Button disabled variant="secondary">
+            <ExternalLink size={17} />
+            Open Opportunity
+          </Button>
+        )}
         {transactionNeedsSync ? (
           <Button
             disabled={isRetryingSync}

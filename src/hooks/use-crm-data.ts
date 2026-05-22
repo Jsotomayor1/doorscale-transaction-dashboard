@@ -108,6 +108,8 @@ export type Transaction = {
   syncStatus?: string;
   lastSyncError?: string;
   lastSyncedAt?: string;
+  ghlContactId?: string;
+  ghlLocationId?: string;
   ghlOpportunityId?: string;
   documentCounts?: DocumentStatusCounts;
 };
@@ -142,6 +144,8 @@ export type Opportunity = {
   syncStatus?: string;
   lastSyncError?: string;
   lastSyncedAt?: string;
+  ghlContactId?: string;
+  ghlLocationId?: string;
   ghlOpportunityId?: string;
 };
 
@@ -209,6 +213,9 @@ type SupabaseTransaction = {
   sync_status: string | null;
   last_sync_error: string | null;
   last_synced_at: string | null;
+  contact_id?: string | null;
+  ghl_contact_id?: string | null;
+  ghl_location_id?: string | null;
   created_at: string | null;
   updated_at: string | null;
   ghl_opportunity_id?: string | null;
@@ -442,6 +449,8 @@ function toOpportunity(
     syncStatus: transaction.sync_status ?? "synced",
     lastSyncError: transaction.last_sync_error ?? "",
     lastSyncedAt: transaction.last_synced_at ?? "",
+    ghlContactId: transaction.ghl_contact_id ?? transaction.contact_id ?? "",
+    ghlLocationId: transaction.ghl_location_id ?? transaction.location_id ?? "",
     ghlOpportunityId: transaction.ghl_opportunity_id ?? "",
   };
 }
@@ -501,6 +510,8 @@ function mapSupabaseData(
       syncStatus: transaction.sync_status ?? "synced",
       lastSyncError: transaction.last_sync_error ?? "",
       lastSyncedAt: transaction.last_synced_at ?? "",
+      ghlContactId: transaction.ghl_contact_id ?? transaction.contact_id ?? "",
+      ghlLocationId: transaction.ghl_location_id ?? transaction.location_id ?? "",
       ghlOpportunityId: transaction.ghl_opportunity_id ?? "",
       documentCounts: documentCountsByTransaction[transaction.id] ?? emptyDocumentCounts(),
       tasks: relatedTasks.map((task) => ({
@@ -600,7 +611,7 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
     client
       .from("transactions")
       .select(
-        "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, assigned_to, contact_name, contact_email, contact_phone, closing_date, inspection_date, commission, status, sync_status, last_sync_error, last_synced_at, ghl_opportunity_id, created_at, updated_at",
+        "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, assigned_to, contact_name, contact_email, contact_phone, closing_date, inspection_date, commission, status, sync_status, last_sync_error, last_synced_at, contact_id, ghl_contact_id, ghl_location_id, ghl_opportunity_id, created_at, updated_at",
       )
       .eq("location_id", LOCATION_ID),
     client

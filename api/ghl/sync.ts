@@ -95,7 +95,9 @@ type DoorScaleOpportunity = {
   createdAt?: string;
   updatedAt?: string;
   contactId?: string;
+  contact_id?: string;
   locationId?: string;
+  location_id?: string;
   contact?: {
     name?: string;
     first_name?: string;
@@ -176,6 +178,8 @@ type ExistingTransaction = {
   buyer_name: string | null;
   closing_date: string | null;
   contact_id: string | null;
+  ghl_contact_id: string | null;
+  ghl_location_id: string | null;
   commission: number | null;
   inspection_date: string | null;
   property_address: string | null;
@@ -192,6 +196,8 @@ type TransactionUpsertPayload = {
   location_id: string;
   ghl_opportunity_id: string;
   contact_id: string | null;
+  ghl_contact_id: string | null;
+  ghl_location_id: string | null;
   assigned_to: string | null;
   contact_name: string | null;
   contact_email: string | null;
@@ -715,11 +721,24 @@ function mapOpportunityToTransaction(
   const stageId = getOpportunityStageId(opportunity);
   const transactionType = getContactTransactionType(opportunity, fieldMap);
   const fallbackPartyName = getFallbackPartyName(opportunity, transactionType);
+  const contactId =
+    opportunity.contactId ??
+    opportunity.contact_id ??
+    existing?.ghl_contact_id ??
+    existing?.contact_id ??
+    null;
+  const locationId =
+    opportunity.locationId ??
+    opportunity.location_id ??
+    existing?.ghl_location_id ??
+    fallbackLocationId;
 
   return {
-    location_id: opportunity.locationId || fallbackLocationId,
+    location_id: locationId,
     ghl_opportunity_id: opportunity.id,
-    contact_id: opportunity.contactId || existing?.contact_id || null,
+    contact_id: contactId,
+    ghl_contact_id: contactId ?? existing?.ghl_contact_id ?? null,
+    ghl_location_id: locationId,
     assigned_to: keepExistingWhenEmpty(
       getOpportunityAssignedTo(opportunity),
       existing?.assigned_to,
@@ -1038,7 +1057,7 @@ export default async function handler(
     await supabase
       .from("transactions")
       .select(
-        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, property_address, assigned_to, contact_name, contact_email, contact_phone, commission, status",
+        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, ghl_contact_id, ghl_location_id, property_address, assigned_to, contact_name, contact_email, contact_phone, commission, status",
       )
       .in("ghl_opportunity_id", opportunityIds);
 
