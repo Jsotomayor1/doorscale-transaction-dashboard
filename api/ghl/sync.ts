@@ -132,6 +132,9 @@ type TransactionUpsertPayload = {
   inspection_date: string | null;
   commission: number;
   status: string;
+  sync_status: string;
+  last_sync_error: string | null;
+  last_synced_at: string;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -151,6 +154,9 @@ type TaskUpsertPayload = {
   ghl_task_id: string;
   location_id: string;
   status: string;
+  sync_status: string;
+  last_sync_error: string | null;
+  last_synced_at: string;
   title: string;
   transaction_id: string;
 };
@@ -419,6 +425,9 @@ function mapOpportunityToTransaction(
     inspection_date: existing?.inspection_date ?? null,
     commission: toCommission(opportunity.monetaryValue),
     status: mapOpportunityStatus(opportunity.status),
+    sync_status: "synced",
+    last_sync_error: null,
+    last_synced_at: new Date().toISOString(),
     created_at: opportunity.createdAt || null,
     updated_at: opportunity.updatedAt || null,
   };
@@ -457,6 +466,9 @@ function mapTaskToPayload(
     ghl_task_id: taskId,
     location_id: fallbackLocationId,
     status: getTaskStatus(task),
+    sync_status: "synced",
+    last_sync_error: null,
+    last_synced_at: new Date().toISOString(),
     title: getTaskTitle(task),
     transaction_id: matchedTransaction.id,
   };

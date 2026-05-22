@@ -96,6 +96,10 @@ export type Transaction = {
   createdAt: string;
   updatedAt: string;
   tasks: TransactionTask[];
+  syncStatus?: string;
+  lastSyncError?: string;
+  lastSyncedAt?: string;
+  ghlOpportunityId?: string;
 };
 
 export type Opportunity = {
@@ -121,6 +125,10 @@ export type Opportunity = {
     agentPayout: number;
     missingDocuments: string[];
   };
+  syncStatus?: string;
+  lastSyncError?: string;
+  lastSyncedAt?: string;
+  ghlOpportunityId?: string;
 };
 
 export type DashboardTask = {
@@ -134,6 +142,10 @@ export type DashboardTask = {
   transactionId: string;
   propertyAddress: string;
   clientName: string;
+  syncStatus?: string;
+  lastSyncError?: string;
+  lastSyncedAt?: string;
+  ghlTaskId?: string;
 };
 
 type TaskWriteResponse = {
@@ -160,8 +172,12 @@ type SupabaseTransaction = {
   inspection_date: string | null;
   commission: number | null;
   status: string | null;
+  sync_status: string | null;
+  last_sync_error: string | null;
+  last_synced_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  ghl_opportunity_id?: string | null;
 };
 
 type SupabaseTask = {
@@ -173,6 +189,10 @@ type SupabaseTask = {
   due_datetime: string | null;
   status: string | null;
   assigned_to: string | null;
+  sync_status: string | null;
+  last_sync_error: string | null;
+  last_synced_at: string | null;
+  ghl_task_id?: string | null;
   created_at: string | null;
 };
 
@@ -341,6 +361,10 @@ function toOpportunity(
       agentPayout: commission,
       missingDocuments: [],
     },
+    syncStatus: transaction.sync_status ?? "synced",
+    lastSyncError: transaction.last_sync_error ?? "",
+    lastSyncedAt: transaction.last_synced_at ?? "",
+    ghlOpportunityId: transaction.ghl_opportunity_id ?? "",
   };
 }
 
@@ -369,6 +393,10 @@ function mapSupabaseData(
       sellerName: transaction.seller_name ?? "",
       createdAt: transaction.created_at ?? "",
       updatedAt: transaction.updated_at ?? transaction.created_at ?? "",
+      syncStatus: transaction.sync_status ?? "synced",
+      lastSyncError: transaction.last_sync_error ?? "",
+      lastSyncedAt: transaction.last_synced_at ?? "",
+      ghlOpportunityId: transaction.ghl_opportunity_id ?? "",
       tasks: relatedTasks.map((task) => ({
         id: task.id,
         title: task.title ?? "Untitled task",
@@ -406,6 +434,10 @@ function mapSupabaseData(
         transactionId: task.transaction_id ?? "",
         propertyAddress: transaction?.propertyAddress ?? "",
         clientName: transaction?.clientName ?? "",
+        syncStatus: task.sync_status ?? "synced",
+        lastSyncError: task.last_sync_error ?? "",
+        lastSyncedAt: task.last_synced_at ?? "",
+        ghlTaskId: task.ghl_task_id ?? "",
       };
     }),
   };
@@ -460,13 +492,13 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
     client
       .from("transactions")
       .select(
-        "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, closing_date, inspection_date, commission, status, created_at, updated_at",
+        "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, closing_date, inspection_date, commission, status, sync_status, last_sync_error, last_synced_at, ghl_opportunity_id, created_at, updated_at",
       )
       .eq("location_id", LOCATION_ID),
     client
       .from("tasks")
       .select(
-        "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, created_at",
+        "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
       )
       .eq("location_id", LOCATION_ID),
   ]);
@@ -994,6 +1026,86 @@ export function useCrmData() {
     [refreshData],
   );
 
+  const retryTransactionSync = useCallback(
+    async (transactionId: string) => {
+      const transaction = data.opportunities.find(
+        (opportunity) => String(opportunity.id) === String(transactionId),
+      );
+
+      if (!transaction) {
+        throw new Error("Transaction not found.");
+      }
+
+      const fields = transaction.customFields;
+      const endpoint = transaction.ghlOpportunityId
+        ? "/api/ghl/transactions/update"
+        : "/api/ghl/transactions/create";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          buyerName: fields.buyerName,
+          closingDate: fields.closingDate,
+          commission: String(transaction.value || 0),
+          inspectionDate: fields.inspectionDeadline,
+          propertyAddress: fields.propertyAddress || transaction.name,
+          sellerName: fields.sellerName,
+          stage: transaction.stage,
+          status: transaction.status,
+          transactionId,
+          transactionType: fields.transactionType,
+        }),
+      });
+      const result = await parseTransactionWriteResponse(response);
+
+      await refreshData();
+
+      return result.ok === false
+        ? result.message || "Transaction saved locally. DoorScale sync will retry later."
+        : "Transaction synced.";
+    },
+    [data.opportunities, refreshData],
+  );
+
+  const retryTaskSync = useCallback(
+    async (taskId: string) => {
+      const task = data.tasks.find((currentTask) => currentTask.id === taskId);
+
+      if (!task) {
+        throw new Error("Task not found.");
+      }
+
+      const endpoint = task.ghlTaskId
+        ? "/api/ghl/tasks/update"
+        : "/api/ghl/tasks/create";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          assignedTo: task.assignedTo,
+          dueDate: task.dueDate || null,
+          dueDateTime: task.dueDateTime || null,
+          status: task.status,
+          taskId,
+          title: task.title,
+          transactionId: task.transactionId,
+        }),
+      });
+      const result = await parseTaskWriteResponse(response);
+
+      await refreshData();
+
+      return result.ok === false
+        ? result.message || "Task saved locally. DoorScale sync will retry later."
+        : "Task synced.";
+    },
+    [data.tasks, refreshData],
+  );
+
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
@@ -1052,6 +1164,8 @@ export function useCrmData() {
       updateTransactionStage,
       markTaskCompleted,
       updateTaskDueDateTime,
+      retryTransactionSync,
+      retryTaskSync,
     };
   }, [
     createTask,
@@ -1061,6 +1175,8 @@ export function useCrmData() {
     loading,
     markTaskCompleted,
     refreshData,
+    retryTaskSync,
+    retryTransactionSync,
     updateTransactionDetails,
     updateTaskDueDateTime,
     updateTransactionStage,

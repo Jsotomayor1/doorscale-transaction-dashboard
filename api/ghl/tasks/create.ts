@@ -21,6 +21,7 @@ type CreateTaskBody = {
   dueDateTime?: string;
   status?: string;
   title?: string;
+  taskId?: string;
   transactionId?: string;
 };
 
@@ -161,14 +162,19 @@ export default async function handler(
     console.error("DoorScale task create write-back failed:", error);
   }
 
-  const { data: savedTask, error: saveError } = await supabase
-    .from("tasks")
-    .insert({
-      ...localTask,
-      ghl_task_id: externalTaskId ?? null,
-    })
-    .select("id")
-    .single();
+  const taskRow = {
+    ...localTask,
+    ghl_task_id: externalTaskId ?? null,
+    sync_status: writeBackFailed ? "pending_sync" : "synced",
+    last_sync_error: writeBackFailed
+      ? "Task saved locally. DoorScale sync will retry later."
+      : null,
+    last_synced_at: writeBackFailed ? null : new Date().toISOString(),
+  };
+  const saveQuery = body.taskId
+    ? supabase.from("tasks").update(taskRow).eq("id", body.taskId).select("id").single()
+    : supabase.from("tasks").insert(taskRow).select("id").single();
+  const { data: savedTask, error: saveError } = await saveQuery;
 
   if (saveError) {
     console.error("Local task create failed:", saveError);

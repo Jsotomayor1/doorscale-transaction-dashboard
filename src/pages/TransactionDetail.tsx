@@ -75,6 +75,18 @@ function stageVariant(stage: string) {
   return "default";
 }
 
+function getSyncLabel(syncStatus = "synced") {
+  if (syncStatus === "pending_sync") return "Pending Sync";
+  if (syncStatus === "sync_error") return "Sync Error";
+  return "Synced";
+}
+
+function getSyncVariant(syncStatus = "synced") {
+  if (syncStatus === "pending_sync") return "warning";
+  if (syncStatus === "sync_error") return "danger";
+  return "success";
+}
+
 export default function TransactionDetail() {
   const { id } = useParams();
   const data = useCRMData();
@@ -86,6 +98,7 @@ export default function TransactionDetail() {
   const [isTaskSubmitting, setIsTaskSubmitting] = useState(false);
   const [taskForm, setTaskForm] = useState(initialTaskForm);
   const [taskError, setTaskError] = useState("");
+  const [isRetryingSync, setIsRetryingSync] = useState(false);
   const [detailMessage, setDetailMessage] = useState("");
   const [detailError, setDetailError] = useState("");
   const transaction = data.opportunities.find(
@@ -206,6 +219,27 @@ export default function TransactionDetail() {
     }
   }
 
+  async function handleRetryTransactionSync() {
+    setDetailMessage("");
+    setDetailError("");
+    setIsRetryingSync(true);
+
+    try {
+      const message = await data.retryTransactionSync(transactionId);
+      setDetailMessage(message || "Transaction synced.");
+    } catch (error) {
+      setDetailError(
+        error instanceof Error ? error.message : "Unable to retry sync.",
+      );
+    } finally {
+      setIsRetryingSync(false);
+    }
+  }
+
+  const transactionNeedsSync = ["pending_sync", "sync_error"].includes(
+    (transaction.syncStatus || "synced").toLowerCase(),
+  );
+
   return (
     <div className="dashboard transaction-workspace">
       <header className="workspace-header">
@@ -223,6 +257,9 @@ export default function TransactionDetail() {
         </div>
         <Badge variant={stageVariant(transaction.stage)}>
           {transaction.stage as TransactionStage}
+        </Badge>
+        <Badge variant={getSyncVariant(transaction.syncStatus)}>
+          {getSyncLabel(transaction.syncStatus)}
         </Badge>
       </header>
 
@@ -249,6 +286,15 @@ export default function TransactionDetail() {
         <Button disabled variant="ghost">
           Open in DoorScale
         </Button>
+        {transactionNeedsSync ? (
+          <Button
+            disabled={isRetryingSync}
+            onClick={() => void handleRetryTransactionSync()}
+            variant="secondary"
+          >
+            Retry Sync
+          </Button>
+        ) : null}
       </section>
 
       {detailMessage ? (
@@ -476,6 +522,7 @@ export default function TransactionDetail() {
                   <TaskItem
                     key={task.id}
                     onComplete={data.markTaskCompleted}
+                    onRetrySync={data.retryTaskSync}
                     onUpdateDueDateTime={data.updateTaskDueDateTime}
                     task={task}
                   />

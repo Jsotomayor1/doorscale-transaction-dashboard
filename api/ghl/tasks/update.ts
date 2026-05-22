@@ -54,6 +54,16 @@ function buildLocalUpdate(body: UpdateTaskBody) {
   };
 }
 
+function getSyncFields(writeBackFailed: boolean) {
+  return {
+    sync_status: writeBackFailed ? "pending_sync" : "synced",
+    last_sync_error: writeBackFailed
+      ? "Task saved locally. DoorScale sync will retry later."
+      : null,
+    last_synced_at: writeBackFailed ? null : new Date().toISOString(),
+  };
+}
+
 function buildDoorScaleUpdate(body: UpdateTaskBody, task: TaskRow) {
   return {
     assignedTo: body.assignedTo ?? task.assigned_to ?? undefined,
@@ -149,7 +159,10 @@ export default async function handler(
 
   const { error: updateError } = await supabase
     .from("tasks")
-    .update(buildLocalUpdate(body))
+    .update({
+      ...buildLocalUpdate(body),
+      ...getSyncFields(writeBackFailed),
+    })
     .eq("id", body.taskId);
 
   if (updateError) {

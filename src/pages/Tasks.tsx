@@ -12,6 +12,7 @@ export default function Tasks() {
     error,
     loading,
     markTaskCompleted,
+    retryTaskSync,
     tasks,
     updateTaskDueDateTime,
   } = useCRMData();
@@ -53,6 +54,7 @@ export default function Tasks() {
           <TaskItem
             key={task.id}
             onComplete={markTaskCompleted}
+            onRetrySync={retryTaskSync}
             onUpdateDueDateTime={updateTaskDueDateTime}
             showContext
             task={task}

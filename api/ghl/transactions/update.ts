@@ -150,6 +150,16 @@ function buildLocalUpdate(body: UpdateTransactionBody) {
   };
 }
 
+function getSyncFields(writeBackFailed: boolean) {
+  return {
+    sync_status: writeBackFailed ? "pending_sync" : "synced",
+    last_sync_error: writeBackFailed
+      ? "Transaction saved locally. DoorScale sync will retry later."
+      : null,
+    last_synced_at: writeBackFailed ? null : new Date().toISOString(),
+  };
+}
+
 function buildOpportunityUpdate(
   body: UpdateTransactionBody,
   pipelineId?: string,
@@ -259,7 +269,10 @@ export default async function handler(
 
   const { error: updateError } = await supabase
     .from("transactions")
-    .update(buildLocalUpdate(body))
+    .update({
+      ...buildLocalUpdate(body),
+      ...getSyncFields(writeBackFailed),
+    })
     .eq("id", body.transactionId);
 
   if (updateError) {

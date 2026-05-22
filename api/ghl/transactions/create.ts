@@ -41,6 +41,7 @@ type CreateTransactionBody = {
   sellerName?: string;
   stage?: string;
   status?: string;
+  transactionId?: string;
   transactionType?: string;
 };
 
@@ -220,23 +221,33 @@ export default async function handler(
     console.error("DoorScale transaction create write-back failed:", error);
   }
 
-  const { data: savedTransaction, error: saveError } = await supabase
-    .from("transactions")
-    .insert({
-      buyer_name: body.buyerName || null,
-      closing_date: body.closingDate || null,
-      commission: Number(body.commission || 0),
-      ghl_opportunity_id: opportunityId ?? null,
-      inspection_date: body.inspectionDate || null,
-      location_id: "demo-location",
-      property_address: body.propertyAddress,
-      seller_name: body.sellerName || null,
-      stage: body.stage,
-      status: body.status || "active",
-      transaction_type: body.transactionType,
-    })
-    .select("id")
-    .single();
+  const transactionRow = {
+    buyer_name: body.buyerName || null,
+    closing_date: body.closingDate || null,
+    commission: Number(body.commission || 0),
+    ghl_opportunity_id: opportunityId ?? null,
+    inspection_date: body.inspectionDate || null,
+    location_id: "demo-location",
+    property_address: body.propertyAddress,
+    seller_name: body.sellerName || null,
+    stage: body.stage,
+    status: body.status || "active",
+    sync_status: writeBackFailed ? "pending_sync" : "synced",
+    last_sync_error: writeBackFailed
+      ? "Transaction saved locally. DoorScale sync will retry later."
+      : null,
+    last_synced_at: writeBackFailed ? null : new Date().toISOString(),
+    transaction_type: body.transactionType,
+  };
+  const saveQuery = body.transactionId
+    ? supabase
+        .from("transactions")
+        .update(transactionRow)
+        .eq("id", body.transactionId)
+        .select("id")
+        .single()
+    : supabase.from("transactions").insert(transactionRow).select("id").single();
+  const { data: savedTransaction, error: saveError } = await saveQuery;
 
   if (saveError) {
     console.error("Local transaction create failed:", saveError);

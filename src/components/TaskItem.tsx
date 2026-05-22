@@ -8,6 +8,7 @@ import { type DashboardTask } from "@/hooks/use-crm-data";
 type TaskItemProps = {
   task: DashboardTask;
   onComplete: (taskId: string) => Promise<void>;
+  onRetrySync?: (taskId: string) => Promise<string | void>;
 onUpdateDueDateTime: (input: {
   taskId: string;
   dueDate: string;
@@ -66,8 +67,21 @@ function isOverdue(task: DashboardTask) {
   );
 }
 
+function getSyncLabel(syncStatus = "synced") {
+  if (syncStatus === "pending_sync") return "Pending Sync";
+  if (syncStatus === "sync_error") return "Sync Error";
+  return "Synced";
+}
+
+function getSyncVariant(syncStatus = "synced") {
+  if (syncStatus === "pending_sync") return "warning";
+  if (syncStatus === "sync_error") return "danger";
+  return "success";
+}
+
 export function TaskItem({
   onComplete,
+  onRetrySync,
   onUpdateDueDateTime,
   showContext = false,
   task,
@@ -116,6 +130,30 @@ await onUpdateDueDateTime({
     }
   }
 
+  async function handleRetrySync() {
+    if (!onRetrySync) return;
+
+    setTaskError("");
+    setIsSaving(true);
+
+    try {
+      const message = await onRetrySync(task.id);
+      if (message) {
+        setTaskError(message);
+      }
+    } catch (error) {
+      setTaskError(
+        error instanceof Error ? error.message : "Unable to retry sync.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const needsSync = ["pending_sync", "sync_error"].includes(
+    (task.syncStatus || "synced").toLowerCase(),
+  );
+
   return (
     <article
       className={[
@@ -133,6 +171,9 @@ await onUpdateDueDateTime({
       <div className="task-row__badges">
         {overdue ? <Badge variant="danger">Overdue</Badge> : null}
         <Badge variant={taskVariant(task)}>{completed ? "completed" : task.status}</Badge>
+        <Badge variant={getSyncVariant(task.syncStatus)}>
+          {getSyncLabel(task.syncStatus)}
+        </Badge>
       </div>
       <span className="task-row__due">
         <CalendarClock size={15} />
@@ -162,6 +203,15 @@ await onUpdateDueDateTime({
           <Pencil size={15} />
           Edit Due Date/Time
         </Button>
+        {needsSync ? (
+          <Button
+            disabled={isSaving}
+            onClick={() => void handleRetrySync()}
+            variant="secondary"
+          >
+            Retry Sync
+          </Button>
+        ) : null}
       </div>
 
       {isEditingDueDate ? (
