@@ -57,9 +57,13 @@ type DoorScaleOpportunity = {
   id?: string;
   name?: string;
   monetaryValue?: number | string | null;
+  monetary_value?: number | string | null;
   pipelineId?: string;
+  pipeline_id?: string;
   pipelineStageId?: string;
+  pipeline_stage_id?: string;
   assignedTo?: string;
+  assigned_to?: string;
   status?: string;
   source?: string;
   createdAt?: string;
@@ -68,8 +72,28 @@ type DoorScaleOpportunity = {
   locationId?: string;
   contact?: {
     name?: string;
+    first_name?: string;
+    firstName?: string;
+    last_name?: string;
+    lastName?: string;
     email?: string;
     phone?: string;
+    transaction_type?: string;
+    transactionType?: string;
+  };
+  custom_objects?: {
+    transactions?: {
+      buyer_name?: string;
+      property_address?: string;
+      seller_name?: string;
+    };
+  };
+  customObjects?: {
+    transactions?: {
+      buyerName?: string;
+      propertyAddress?: string;
+      sellerName?: string;
+    };
   };
   relations?: Array<{
     contactName?: string;
@@ -114,15 +138,26 @@ type ExistingTransaction = {
   buyer_name: string | null;
   closing_date: string | null;
   contact_id: string | null;
+  commission: number | null;
   inspection_date: string | null;
+  property_address: string | null;
   seller_name: string | null;
   transaction_type: string | null;
+  status: string | null;
+  assigned_to: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
 };
 
 type TransactionUpsertPayload = {
   location_id: string;
   ghl_opportunity_id: string;
   contact_id: string | null;
+  assigned_to: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
   property_address: string;
   transaction_type: string;
   stage: string;
@@ -297,45 +332,72 @@ function findTransactionManagementSystemPipeline(pipelines: Pipeline[]) {
   );
 }
 
-function stringifyFieldValue(value: unknown) {
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return value.join(" ");
-  if (value && typeof value === "object") return JSON.stringify(value);
-  return "";
+function keepExistingWhenEmpty<T>(incoming: T | null | undefined, existing: T | null | undefined, fallback: T) {
+  if (typeof incoming === "string") {
+    return incoming.trim() ? incoming : existing ?? fallback;
+  }
+
+  return incoming ?? existing ?? fallback;
 }
 
-function inferTransactionType(opportunity: DoorScaleOpportunity) {
-  const sourceText = [
-    stringifyFieldValue(opportunity.tags),
-    ...(opportunity.customFields ?? []).flatMap((field) => [
-      field.key,
-      field.fieldKey,
-      field.name,
-      stringifyFieldValue(field.value),
-    ]),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  if (sourceText.includes("buyer/seller")) return "Buyer/Seller";
-  if (sourceText.includes("rental")) return "Rental";
-  if (sourceText.includes("buyer")) return "Buyer";
-  if (sourceText.includes("seller")) return "Seller";
-
-  return undefined;
+function getOpportunityPipelineId(opportunity: DoorScaleOpportunity) {
+  return opportunity.pipeline_id ?? opportunity.pipelineId;
 }
 
-function getSellerName(opportunity: DoorScaleOpportunity) {
+function getOpportunityStageId(opportunity: DoorScaleOpportunity) {
+  return opportunity.pipeline_stage_id ?? opportunity.pipelineStageId;
+}
+
+function getOpportunityAssignedTo(opportunity: DoorScaleOpportunity) {
+  return opportunity.assigned_to ?? opportunity.assignedTo ?? null;
+}
+
+function getOpportunityCommission(opportunity: DoorScaleOpportunity) {
+  return opportunity.monetary_value ?? opportunity.monetaryValue;
+}
+
+function getContactTransactionType(opportunity: DoorScaleOpportunity) {
+  return opportunity.contact?.transaction_type ?? opportunity.contact?.transactionType ?? null;
+}
+
+function getContactName(opportunity: DoorScaleOpportunity) {
+  const firstName = opportunity.contact?.first_name ?? opportunity.contact?.firstName ?? "";
+  const lastName = opportunity.contact?.last_name ?? opportunity.contact?.lastName ?? "";
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+
+  return fullName || opportunity.contact?.name || null;
+}
+
+function getObjectTransaction(opportunity: DoorScaleOpportunity) {
   return (
-    opportunity.contact?.name ??
-    opportunity.relations?.[0]?.contactName ??
-    null
+    opportunity.custom_objects?.transactions ??
+    opportunity.customObjects?.transactions ??
+    {}
   );
 }
 
-function toCommission(value: DoorScaleOpportunity["monetaryValue"]) {
+function getObjectSellerName(opportunity: DoorScaleOpportunity) {
+  const transaction = getObjectTransaction(opportunity);
+  return "seller_name" in transaction
+    ? transaction.seller_name ?? null
+    : transaction.sellerName ?? null;
+}
+
+function getObjectBuyerName(opportunity: DoorScaleOpportunity) {
+  const transaction = getObjectTransaction(opportunity);
+  return "buyer_name" in transaction
+    ? transaction.buyer_name ?? null
+    : transaction.buyerName ?? null;
+}
+
+function getObjectPropertyAddress(opportunity: DoorScaleOpportunity) {
+  const transaction = getObjectTransaction(opportunity);
+  return "property_address" in transaction
+    ? transaction.property_address ?? null
+    : transaction.propertyAddress ?? null;
+}
+
+function toCommission(value: number | string | null | undefined) {
   const commission = Number(value ?? 0);
   return Number.isFinite(commission) ? commission : 0;
 }
@@ -386,19 +448,6 @@ function getTaskAssignee(task: DoorScaleTask) {
   return task.assignedTo ?? task.assigned_to ?? null;
 }
 
-function mapOpportunityStatus(status?: string) {
-  switch (status?.toLowerCase()) {
-    case "open":
-      return "active";
-    case "won":
-      return "closed";
-    case "lost":
-      return "dead";
-    default:
-      return status || "active";
-  }
-}
-
 function mapOpportunityToTransaction(
   opportunity: DoorScaleOpportunity,
   fallbackLocationId: string,
@@ -409,22 +458,63 @@ function mapOpportunityToTransaction(
     return null;
   }
 
+  const stageId = getOpportunityStageId(opportunity);
+
   return {
     location_id: opportunity.locationId || fallbackLocationId,
     ghl_opportunity_id: opportunity.id,
     contact_id: opportunity.contactId || existing?.contact_id || null,
-    property_address: opportunity.name || "Untitled Transaction",
-    transaction_type:
-      inferTransactionType(opportunity) || existing?.transaction_type || "Seller",
-    stage: opportunity.pipelineStageId
-      ? stageMap[opportunity.pipelineStageId] || "Unmapped Stage"
+    assigned_to: keepExistingWhenEmpty(
+      getOpportunityAssignedTo(opportunity),
+      existing?.assigned_to,
+      "",
+    ),
+    contact_name: keepExistingWhenEmpty(
+      getContactName(opportunity),
+      existing?.contact_name,
+      "",
+    ),
+    contact_email: keepExistingWhenEmpty(
+      opportunity.contact?.email ?? null,
+      existing?.contact_email,
+      "",
+    ),
+    contact_phone: keepExistingWhenEmpty(
+      opportunity.contact?.phone ?? null,
+      existing?.contact_phone,
+      "",
+    ),
+    property_address: keepExistingWhenEmpty(
+      getObjectPropertyAddress(opportunity),
+      existing?.property_address,
+      "Untitled Transaction",
+    ),
+    transaction_type: keepExistingWhenEmpty(
+      getContactTransactionType(opportunity),
+      existing?.transaction_type,
+      "Seller",
+    ),
+    stage: stageId
+      ? stageMap[stageId] || "Unmapped Stage"
       : "Unmapped Stage",
-    buyer_name: existing?.buyer_name ?? null,
-    seller_name: getSellerName(opportunity) ?? existing?.seller_name ?? null,
+    buyer_name: keepExistingWhenEmpty(
+      getObjectBuyerName(opportunity),
+      existing?.buyer_name,
+      "",
+    ) || null,
+    seller_name: keepExistingWhenEmpty(
+      getObjectSellerName(opportunity),
+      existing?.seller_name,
+      "",
+    ) || null,
     closing_date: existing?.closing_date ?? null,
     inspection_date: existing?.inspection_date ?? null,
-    commission: toCommission(opportunity.monetaryValue),
-    status: mapOpportunityStatus(opportunity.status),
+    commission:
+      getOpportunityCommission(opportunity) === undefined ||
+      getOpportunityCommission(opportunity) === null
+        ? Number(existing?.commission ?? 0)
+        : toCommission(getOpportunityCommission(opportunity)),
+    status: keepExistingWhenEmpty(opportunity.status, existing?.status, "active"),
     sync_status: "synced",
     last_sync_error: null,
     last_synced_at: new Date().toISOString(),
@@ -578,7 +668,7 @@ export default async function handler(
   const stageMap = buildStageMap(pipelineUsed);
   const syncableOpportunities = pipelineIdUsed
     ? opportunities.filter(
-        (opportunity) => opportunity.pipelineId === pipelineIdUsed,
+        (opportunity) => getOpportunityPipelineId(opportunity) === pipelineIdUsed,
       )
     : [];
   const skippedOpportunities = opportunities.length - syncableOpportunities.length;
@@ -604,7 +694,7 @@ export default async function handler(
     await supabase
       .from("transactions")
       .select(
-        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id",
+        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, property_address, assigned_to, contact_name, contact_email, contact_phone, commission, status",
       )
       .in("ghl_opportunity_id", opportunityIds);
 

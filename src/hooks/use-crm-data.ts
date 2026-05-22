@@ -93,6 +93,10 @@ export type Transaction = {
   status: string;
   buyerName: string;
   sellerName: string;
+  assignedTo?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
   createdAt: string;
   updatedAt: string;
   tasks: TransactionTask[];
@@ -120,6 +124,10 @@ export type Opportunity = {
     inspectionDeadline: string;
     buyerName: string;
     sellerName: string;
+    assignedAgent?: string;
+    contactName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
     grossCommission: number;
     netCommission: number;
     agentPayout: number;
@@ -168,6 +176,10 @@ type SupabaseTransaction = {
   stage: string | null;
   buyer_name: string | null;
   seller_name: string | null;
+  assigned_to: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
   closing_date: string | null;
   inspection_date: string | null;
   commission: number | null;
@@ -356,6 +368,10 @@ function toOpportunity(
       inspectionDeadline: transaction.inspection_date ?? "",
       buyerName: transaction.buyer_name ?? "",
       sellerName: transaction.seller_name ?? "",
+      assignedAgent: transaction.assigned_to ?? "",
+      contactName: transaction.contact_name ?? "",
+      contactEmail: transaction.contact_email ?? "",
+      contactPhone: transaction.contact_phone ?? "",
       grossCommission: commission,
       netCommission: commission,
       agentPayout: commission,
@@ -391,6 +407,10 @@ function mapSupabaseData(
       status: transaction.status ?? "active",
       buyerName: transaction.buyer_name ?? "",
       sellerName: transaction.seller_name ?? "",
+      assignedTo: transaction.assigned_to ?? "",
+      contactName: transaction.contact_name ?? "",
+      contactEmail: transaction.contact_email ?? "",
+      contactPhone: transaction.contact_phone ?? "",
       createdAt: transaction.created_at ?? "",
       updatedAt: transaction.updated_at ?? transaction.created_at ?? "",
       syncStatus: transaction.sync_status ?? "synced",
@@ -492,7 +512,7 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
     client
       .from("transactions")
       .select(
-        "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, closing_date, inspection_date, commission, status, sync_status, last_sync_error, last_synced_at, ghl_opportunity_id, created_at, updated_at",
+        "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, assigned_to, contact_name, contact_email, contact_phone, closing_date, inspection_date, commission, status, sync_status, last_sync_error, last_synced_at, ghl_opportunity_id, created_at, updated_at",
       )
       .eq("location_id", LOCATION_ID),
     client

@@ -252,6 +252,7 @@ export default function TransactionDetail() {
           <h2>{fields.propertyAddress || transaction.name}</h2>
           <div className="workspace-header__meta">
             <span>{fields.transactionType || "Transaction type not set"}</span>
+            <span>{fields.assignedAgent || "Agent not assigned"}</span>
             <span>{transaction.status || "Status not set"}</span>
           </div>
         </div>
@@ -439,6 +440,22 @@ export default function TransactionDetail() {
       <section className="summary-grid" aria-label="Transaction summary">
         <Card>
           <CardHeader>
+            <CardDescription>Transaction Type</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{fields.transactionType || "Not set"}</strong>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Assigned Agent</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{fields.assignedAgent || "Not assigned"}</strong>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
             <CardDescription>Buyer Name</CardDescription>
           </CardHeader>
           <CardContent>
@@ -477,9 +494,46 @@ export default function TransactionDetail() {
             <strong>{formatCurrency(transaction.value)}</strong>
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Current Stage</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <strong>{transaction.stage || "Not set"}</strong>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="workspace-grid">
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Contact Info</CardTitle>
+              <CardDescription>Primary contact for this transaction.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <dl className="detail-list">
+              <div>
+                <dt>Name</dt>
+                <dd>{fields.contactName || "Not set"}</dd>
+              </div>
+              <div>
+                <dt>Email</dt>
+                <dd>{fields.contactEmail || "Not set"}</dd>
+              </div>
+              <div>
+                <dt>Phone</dt>
+                <dd>{fields.contactPhone || "Not set"}</dd>
+              </div>
+              <div>
+                <dt>Property Address</dt>
+                <dd>{fields.propertyAddress || transaction.name || "Not set"}</dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <div>
