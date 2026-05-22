@@ -49,6 +49,11 @@ export type UpdateTaskDueDateTimeInput = {
   dueTime: string;
 };
 
+export type UpdateDocumentStatusInput = {
+  documentId: string;
+  status: "Needed" | "Uploaded" | "Missing";
+};
+
 export type CreateTaskInput = {
   assignedTo: string;
   dueDate: string;
@@ -240,8 +245,19 @@ type SupabaseTaskTemplate = {
   sort_order: number | null;
 };
 
+type SupabaseDocumentTemplate = {
+  id: string;
+  document_type: string | null;
+  document_name: string | null;
+  sort_order: number | null;
+};
+
 type SupabaseTaskTitle = {
   title: string | null;
+};
+
+type SupabaseDocumentType = {
+  document_type: string | null;
 };
 
 type CrmDataState = {
@@ -653,6 +669,68 @@ async function generateChecklistTasks(
   }
 }
 
+async function generateDocumentChecklist(
+  client: SupabaseClient,
+  transactionId: string,
+  transactionType: string,
+  stage: string,
+) {
+  const { data: templates, error: templateError } = await client
+    .from("document_templates")
+    .select("id, document_type, document_name, sort_order")
+    .eq("location_id", LOCATION_ID)
+    .eq("transaction_type", transactionType)
+    .eq("stage", stage)
+    .order("sort_order", { ascending: true });
+
+  if (templateError) {
+    throw new Error("Unable to generate document checklist.");
+  }
+
+  const documentTemplates = (templates ?? []) as SupabaseDocumentTemplate[];
+
+  if (!documentTemplates.length) return;
+
+  const { data: existingDocuments, error: existingDocumentsError } = await client
+    .from("transaction_documents")
+    .select("document_type")
+    .eq("location_id", LOCATION_ID)
+    .eq("transaction_id", transactionId);
+
+  if (existingDocumentsError) {
+    throw new Error("Unable to check existing document checklist.");
+  }
+
+  const existingTypes = new Set(
+    ((existingDocuments ?? []) as SupabaseDocumentType[])
+      .map((document) => document.document_type?.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const documentRows = documentTemplates
+    .filter((template) => {
+      const documentType = template.document_type?.trim().toLowerCase();
+
+      return documentType ? !existingTypes.has(documentType) : false;
+    })
+    .map((template) => ({
+      location_id: LOCATION_ID,
+      transaction_id: transactionId,
+      document_type: template.document_type,
+      document_name: template.document_name || template.document_type,
+      status: "Needed",
+    }));
+
+  if (!documentRows.length) return;
+
+  const { error: insertError } = await client
+    .from("transaction_documents")
+    .insert(documentRows);
+
+  if (insertError) {
+    throw new Error("Unable to create document checklist.");
+  }
+}
+
 const emptyData: CrmDataState = {
   transactions: [],
   opportunities: [],
@@ -818,6 +896,12 @@ export function useCrmData() {
         input.transactionType,
         input.stage,
       );
+      await generateDocumentChecklist(
+        client,
+        result.transactionId,
+        input.transactionType,
+        input.stage,
+      );
 
       await refreshData();
 
@@ -867,6 +951,12 @@ export function useCrmData() {
       const result = await parseTransactionWriteResponse(response);
 
       await generateChecklistTasks(
+        client,
+        input.transactionId,
+        input.transactionType,
+        input.stage,
+      );
+      await generateDocumentChecklist(
         client,
         input.transactionId,
         input.transactionType,
@@ -1176,6 +1266,38 @@ export function useCrmData() {
     [data.tasks, refreshData],
   );
 
+  const updateDocumentStatus = useCallback(
+    async ({ documentId, status }: UpdateDocumentStatusInput) => {
+      if (isDemoMode()) {
+        setData((currentData) => ({
+          ...currentData,
+          documents: currentData.documents.map((document) =>
+            document.id === documentId ? { ...document, status } : document,
+          ),
+        }));
+        return;
+      }
+
+      const client = getSupabaseClient();
+
+      if (!client) {
+        throw new Error("DoorScale connection is not configured.");
+      }
+
+      const { error: updateError } = await client
+        .from("transaction_documents")
+        .update({ status })
+        .eq("id", documentId);
+
+      if (updateError) {
+        throw new Error("Unable to update document status.");
+      }
+
+      await refreshData();
+    },
+    [refreshData],
+  );
+
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
@@ -1236,6 +1358,7 @@ export function useCrmData() {
       updateTaskDueDateTime,
       retryTransactionSync,
       retryTaskSync,
+      updateDocumentStatus,
     };
   }, [
     createTask,
@@ -1247,6 +1370,7 @@ export function useCrmData() {
     refreshData,
     retryTaskSync,
     retryTransactionSync,
+    updateDocumentStatus,
     updateTransactionDetails,
     updateTaskDueDateTime,
     updateTransactionStage,

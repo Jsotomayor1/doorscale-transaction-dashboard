@@ -18,3 +18,6 @@ create index if not exists transaction_documents_transaction_id_idx
 
 create index if not exists transaction_documents_location_id_idx
   on public.transaction_documents (location_id);
+
+create unique index if not exists transaction_documents_unique_type_idx
+  on public.transaction_documents (transaction_id, document_type);

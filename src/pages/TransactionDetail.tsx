@@ -261,6 +261,25 @@ export default function TransactionDetail() {
     }
   }
 
+  async function handleDocumentStatusChange(documentId: string, status: string) {
+    setDetailMessage("");
+    setDetailError("");
+
+    try {
+      await data.updateDocumentStatus({
+        documentId,
+        status: status as "Needed" | "Uploaded" | "Missing",
+      });
+      setDetailMessage("Document status updated.");
+    } catch (error) {
+      setDetailError(
+        error instanceof Error
+          ? error.message
+          : "Unable to update document status.",
+      );
+    }
+  }
+
   const transactionNeedsSync = ["pending_sync", "sync_error"].includes(
     (transaction.syncStatus || "synced").toLowerCase(),
   );
@@ -651,6 +670,23 @@ export default function TransactionDetail() {
                   >
                     {normalizeDocumentStatus(document?.status)}
                   </Badge>
+                  <select
+                    aria-label={`Update ${documentType} status`}
+                    disabled={!document}
+                    onChange={(event) =>
+                      document
+                        ? void handleDocumentStatusChange(
+                            document.id,
+                            event.target.value,
+                          )
+                        : undefined
+                    }
+                    value={normalizeDocumentStatus(document?.status)}
+                  >
+                    <option value="Needed">Needed</option>
+                    <option value="Uploaded">Uploaded</option>
+                    <option value="Missing">Missing</option>
+                  </select>
                 </div>
               ))}
             </div>

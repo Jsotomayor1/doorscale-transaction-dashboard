@@ -432,7 +432,7 @@
 
 .placeholder-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto minmax(130px, auto);
   align-items: center;
   gap: 10px;
   padding: 12px;
@@ -456,6 +456,16 @@
   color: #64748b;
   font-size: 0.78rem;
   font-weight: 650;
+}
+
+.placeholder-row select {
+  min-height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #17202a;
+  background: #ffffff;
+  font-weight: 750;
 }
 
 .notes-placeholder {

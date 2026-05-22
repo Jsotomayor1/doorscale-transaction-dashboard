@@ -216,6 +216,8 @@ type SyncedTransaction = {
   contact_id: string | null;
   ghl_opportunity_id: string | null;
   id: string;
+  stage?: string | null;
+  transaction_type?: string | null;
 };
 
 type TaskUpsertPayload = {
@@ -830,6 +832,84 @@ function dedupeTasksByExternalId(tasks: TaskUpsertPayload[]) {
   );
 }
 
+type DocumentTemplate = {
+  document_name: string | null;
+  document_type: string | null;
+};
+
+type ExistingDocument = {
+  document_type: string | null;
+};
+
+async function generateDocumentChecklist(
+  supabase: ReturnType<typeof createClient>,
+  transaction: SyncedTransaction,
+  locationId: string,
+) {
+  if (!transaction.transaction_type || !transaction.stage) {
+    return;
+  }
+
+  const { data: templates, error: templateError } = await supabase
+    .from("document_templates")
+    .select("document_type, document_name")
+    .eq("location_id", locationId)
+    .eq("transaction_type", transaction.transaction_type)
+    .eq("stage", transaction.stage);
+
+  if (templateError) {
+    console.error("DoorScale document template lookup failed:", templateError);
+    return;
+  }
+
+  const documentTemplates = (templates ?? []) as DocumentTemplate[];
+
+  if (!documentTemplates.length) {
+    return;
+  }
+
+  const { data: existingDocuments, error: existingDocumentsError } = await supabase
+    .from("transaction_documents")
+    .select("document_type")
+    .eq("location_id", locationId)
+    .eq("transaction_id", transaction.id);
+
+  if (existingDocumentsError) {
+    console.error("DoorScale document checklist lookup failed:", existingDocumentsError);
+    return;
+  }
+
+  const existingTypes = new Set(
+    ((existingDocuments ?? []) as ExistingDocument[])
+      .map((document) => document.document_type?.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const rows = documentTemplates
+    .filter((template) => {
+      const documentType = template.document_type?.trim().toLowerCase();
+      return documentType ? !existingTypes.has(documentType) : false;
+    })
+    .map((template) => ({
+      location_id: locationId,
+      transaction_id: transaction.id,
+      document_type: template.document_type,
+      document_name: template.document_name || template.document_type,
+      status: "Needed",
+    }));
+
+  if (!rows.length) {
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("transaction_documents")
+    .insert(rows);
+
+  if (insertError) {
+    console.error("DoorScale document checklist insert failed:", insertError);
+  }
+}
+
 export default async function handler(
   _request: VercelRequest,
   response: VercelResponse,
@@ -1002,7 +1082,7 @@ export default async function handler(
     const { data: syncedTransactions, error: syncError } = await supabase
       .from("transactions")
       .upsert(payload, { onConflict: "ghl_opportunity_id" })
-      .select("id, ghl_opportunity_id, contact_id");
+      .select("id, ghl_opportunity_id, contact_id, transaction_type, stage");
 
     if (syncError) {
       console.error("DoorScale transaction sync upsert failed:", syncError);
@@ -1014,6 +1094,11 @@ export default async function handler(
     }
 
     const syncedTransactionRows = (syncedTransactions ?? []) as SyncedTransaction[];
+    await Promise.all(
+      syncedTransactionRows.map((transaction) =>
+        generateDocumentChecklist(supabase, transaction, connection.location_id),
+      ),
+    );
     const transactionByOpportunityId = new Map(
       syncedTransactionRows
         .filter((transaction) => Boolean(transaction.ghl_opportunity_id))
