@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
+  FileText,
   DollarSign,
   Plus,
   Workflow,
@@ -57,6 +58,7 @@ export default function Index() {
   const {
     activeTransactions,
     createTransaction,
+    documentCounts,
     error,
     loading,
     openTasks,
@@ -151,6 +153,18 @@ export default function Index() {
               }
             </strong>
             <span>completed task checkpoints</span>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Document Summary</CardDescription>
+            <FileText size={20} />
+          </CardHeader>
+          <CardContent>
+            <strong>{documentCounts.needed}</strong>
+            <span>
+              {documentCounts.uploaded} uploaded, {documentCounts.missing} missing
+            </span>
           </CardContent>
         </Card>
       </section>

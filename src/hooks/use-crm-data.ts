@@ -51,7 +51,7 @@ export type UpdateTaskDueDateTimeInput = {
 
 export type UpdateDocumentStatusInput = {
   documentId: string;
-  status: "Needed" | "Uploaded" | "Missing";
+  status: DocumentStatus;
 };
 
 export type CreateTaskInput = {
@@ -109,6 +109,7 @@ export type Transaction = {
   lastSyncError?: string;
   lastSyncedAt?: string;
   ghlOpportunityId?: string;
+  documentCounts?: DocumentStatusCounts;
 };
 
 export type Opportunity = {
@@ -172,6 +173,10 @@ export type TransactionDocument = {
   uploadedAt: string;
   createdAt: string;
 };
+
+export type DocumentStatus = "needed" | "uploaded" | "missing";
+
+export type DocumentStatusCounts = Record<DocumentStatus, number>;
 
 type TaskWriteResponse = {
   message?: string;
@@ -266,6 +271,22 @@ type CrmDataState = {
   tasks: DashboardTask[];
   documents: TransactionDocument[];
 };
+
+function normalizeDocumentStatusValue(status = "needed"): DocumentStatus {
+  const normalizedStatus = status.trim().toLowerCase();
+
+  if (normalizedStatus === "uploaded") return "uploaded";
+  if (normalizedStatus === "missing") return "missing";
+  return "needed";
+}
+
+function emptyDocumentCounts(): DocumentStatusCounts {
+  return {
+    needed: 0,
+    uploaded: 0,
+    missing: 0,
+  };
+}
 
 const today = new Date();
 
@@ -430,6 +451,28 @@ function mapSupabaseData(
   supabaseTasks: SupabaseTask[],
   supabaseDocuments: SupabaseTransactionDocument[],
 ): CrmDataState {
+  const documents = supabaseDocuments.map<TransactionDocument>((document) => ({
+    id: document.id,
+    transactionId: document.transaction_id ?? "",
+    documentType: document.document_type ?? "",
+    documentName: document.document_name ?? "",
+    doorScaleFileId: document.doorscale_file_id ?? "",
+    doorScaleContactId: document.doorscale_contact_id ?? "",
+    status: normalizeDocumentStatusValue(document.status ?? undefined),
+    uploadedAt: document.uploaded_at ?? "",
+    createdAt: document.created_at ?? "",
+  }));
+  const documentCountsByTransaction = documents.reduce<
+    Record<string, DocumentStatusCounts>
+  >((counts, document) => {
+    const transactionId = document.transactionId;
+
+    if (!transactionId) return counts;
+
+    counts[transactionId] ??= emptyDocumentCounts();
+    counts[transactionId][document.status as DocumentStatus] += 1;
+    return counts;
+  }, {});
   const transactions = supabaseTransactions.map<Transaction>((transaction) => {
     const relatedTasks = supabaseTasks.filter(
       (task) => task.transaction_id === transaction.id,
@@ -459,6 +502,7 @@ function mapSupabaseData(
       lastSyncError: transaction.last_sync_error ?? "",
       lastSyncedAt: transaction.last_synced_at ?? "",
       ghlOpportunityId: transaction.ghl_opportunity_id ?? "",
+      documentCounts: documentCountsByTransaction[transaction.id] ?? emptyDocumentCounts(),
       tasks: relatedTasks.map((task) => ({
         id: task.id,
         title: task.title ?? "Untitled task",
@@ -502,17 +546,7 @@ function mapSupabaseData(
         ghlTaskId: task.ghl_task_id ?? "",
       };
     }),
-    documents: supabaseDocuments.map((document) => ({
-      id: document.id,
-      transactionId: document.transaction_id ?? "",
-      documentType: document.document_type ?? "",
-      documentName: document.document_name ?? "",
-      doorScaleFileId: document.doorscale_file_id ?? "",
-      doorScaleContactId: document.doorscale_contact_id ?? "",
-      status: document.status ?? "Needed",
-      uploadedAt: document.uploaded_at ?? "",
-      createdAt: document.created_at ?? "",
-    })),
+    documents,
   };
 }
 
@@ -1311,6 +1345,13 @@ export function useCrmData() {
       (sum, transaction) => sum + transaction.commission,
       0,
     );
+    const documentCounts = data.documents.reduce<DocumentStatusCounts>(
+      (counts, document) => {
+        counts[normalizeDocumentStatusValue(document.status)] += 1;
+        return counts;
+      },
+      emptyDocumentCounts(),
+    );
 
     const stageCounts = data.transactions.reduce<Record<TransactionStage, number>>(
       (counts, transaction) => ({
@@ -1346,6 +1387,7 @@ export function useCrmData() {
           (Number.isNaN(secondDate) ? Infinity : secondDate);
       }),
       totalCommission,
+      documentCounts,
       stageCounts,
       loading,
       error,

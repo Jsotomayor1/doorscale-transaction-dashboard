@@ -154,6 +154,18 @@ export default function Transactions() {
                     <dt>Status</dt>
                     <dd>{transaction.status || "Not set"}</dd>
                   </div>
+                  <div>
+                    <dt>Needed Documents</dt>
+                    <dd>{transaction.documentCounts?.needed ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Missing Documents</dt>
+                    <dd>{transaction.documentCounts?.missing ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Uploaded Documents</dt>
+                    <dd>{transaction.documentCounts?.uploaded ?? 0}</dd>
+                  </div>
                 </dl>
               </CardContent>
             </Card>

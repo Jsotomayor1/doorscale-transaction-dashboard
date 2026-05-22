@@ -98,6 +98,14 @@ function documentStatusVariant(status: string) {
 function normalizeDocumentStatus(status = "Needed") {
   const normalizedStatus = status.toLowerCase();
 
+  if (normalizedStatus === "uploaded") return "uploaded";
+  if (normalizedStatus === "missing") return "missing";
+  return "needed";
+}
+
+function formatDocumentStatus(status = "Needed") {
+  const normalizedStatus = normalizeDocumentStatus(status);
+
   if (normalizedStatus === "uploaded") return "Uploaded";
   if (normalizedStatus === "missing") return "Missing";
   return "Needed";
@@ -268,7 +276,7 @@ export default function TransactionDetail() {
     try {
       await data.updateDocumentStatus({
         documentId,
-        status: status as "Needed" | "Uploaded" | "Missing",
+        status: status as "needed" | "uploaded" | "missing",
       });
       setDetailMessage("Document status updated.");
     } catch (error) {
@@ -668,7 +676,7 @@ export default function TransactionDetail() {
                       document?.status || "Needed",
                     )}
                   >
-                    {normalizeDocumentStatus(document?.status)}
+                    {formatDocumentStatus(document?.status)}
                   </Badge>
                   <select
                     aria-label={`Update ${documentType} status`}
@@ -683,9 +691,9 @@ export default function TransactionDetail() {
                     }
                     value={normalizeDocumentStatus(document?.status)}
                   >
-                    <option value="Needed">Needed</option>
-                    <option value="Uploaded">Uploaded</option>
-                    <option value="Missing">Missing</option>
+                    <option value="needed">Needed</option>
+                    <option value="uploaded">Uploaded</option>
+                    <option value="missing">Missing</option>
                   </select>
                 </div>
               ))}
