@@ -940,7 +940,7 @@ export function useCrmData() {
       await refreshData();
 
       return result.ok === false
-        ? result.message || "Transaction saved locally. DoorScale sync will retry later."
+        ? result.message || "Stage saved locally. DoorScale sync will retry."
         : undefined;
     },
     [refreshData],

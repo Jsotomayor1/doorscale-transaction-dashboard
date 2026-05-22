@@ -150,12 +150,18 @@ function buildLocalUpdate(body: UpdateTransactionBody) {
   };
 }
 
-function getSyncFields(writeBackFailed: boolean) {
+function getLocalSaveMessage(body: UpdateTransactionBody, writeBackFailed: boolean) {
+  if (!writeBackFailed) return "Transaction saved.";
+
+  return body.stage
+    ? "Stage saved locally. DoorScale sync will retry."
+    : "Transaction saved locally. DoorScale sync will retry later.";
+}
+
+function getSyncFields(body: UpdateTransactionBody, writeBackFailed: boolean) {
   return {
     sync_status: writeBackFailed ? "pending_sync" : "synced",
-    last_sync_error: writeBackFailed
-      ? "Transaction saved locally. DoorScale sync will retry later."
-      : null,
+    last_sync_error: writeBackFailed ? getLocalSaveMessage(body, true) : null,
     last_synced_at: writeBackFailed ? null : new Date().toISOString(),
   };
 }
@@ -214,8 +220,15 @@ export default async function handler(
 
   const transactionRow = transaction as TransactionRow;
   let writeBackFailed = false;
+  let matchedPipelineStageId: string | undefined;
 
-  if (transactionRow.ghl_opportunity_id) {
+  if (!transactionRow.ghl_opportunity_id) {
+    writeBackFailed = true;
+    console.log("DoorScale transaction update pending linked opportunity:", {
+      selectedStage: body.stage,
+      transactionId: body.transactionId,
+    });
+  } else {
     try {
       const connectedAccount = await getConnectedAccount(supabase);
 
@@ -233,6 +246,14 @@ export default async function handler(
         );
         pipelineId = pipelineConfig.pipelineId;
         pipelineStageId = pipelineConfig.stageMap.get(body.stage);
+        matchedPipelineStageId = pipelineStageId;
+
+        console.log("DoorScale transaction stage update mapping:", {
+          ghl_opportunity_id: transactionRow.ghl_opportunity_id,
+          matchedPipelineStageId,
+          selectedStage: body.stage,
+          transactionId: body.transactionId,
+        });
 
         if (!pipelineStageId) {
           throw new Error("DoorScale stage could not be matched.");
@@ -254,10 +275,25 @@ export default async function handler(
       );
       const rawBody = await updateResponse.text();
 
+      if (body.stage) {
+        console.log("DoorScale transaction stage update response:", {
+          body: rawBody,
+          ghl_opportunity_id: transactionRow.ghl_opportunity_id,
+          matchedPipelineStageId,
+          selectedStage: body.stage,
+          status: updateResponse.status,
+          transactionId: body.transactionId,
+        });
+      }
+
       if (!updateResponse.ok) {
         console.error("DoorScale opportunity update failed:", {
           body: rawBody,
+          ghl_opportunity_id: transactionRow.ghl_opportunity_id,
+          matchedPipelineStageId,
+          selectedStage: body.stage,
           status: updateResponse.status,
+          transactionId: body.transactionId,
         });
         throw new Error("DoorScale opportunity update failed.");
       }
@@ -271,7 +307,7 @@ export default async function handler(
     .from("transactions")
     .update({
       ...buildLocalUpdate(body),
-      ...getSyncFields(writeBackFailed),
+      ...getSyncFields(body, writeBackFailed),
     })
     .eq("id", body.transactionId);
 
@@ -283,8 +319,6 @@ export default async function handler(
 
   response.status(200).json({
     ok: !writeBackFailed,
-    message: writeBackFailed
-      ? "Transaction saved locally. DoorScale sync will retry later."
-      : "Transaction saved.",
+    message: getLocalSaveMessage(body, writeBackFailed),
   });
 }
