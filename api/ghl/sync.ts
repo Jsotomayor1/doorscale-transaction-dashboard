@@ -318,12 +318,13 @@ async function getLocationAccessToken(
   supabase: ReturnType<typeof createClient>,
   connection: StoredConnection,
 ) {
-  const selectedLocationId =
-    connection.selected_location_id ?? connection.location_id;
+  const selectedLocationId = isCompanyInstall(connection)
+    ? connection.selected_location_id
+    : connection.selected_location_id ?? connection.location_id;
 
   console.log("DoorScale sync selected_location_id:", selectedLocationId);
 
-  if (hasUsableLocationToken(connection)) {
+  if (selectedLocationId && hasUsableLocationToken(connection)) {
     console.log("DoorScale sync location token reused:", {
       selected_location_id: selectedLocationId,
     });
@@ -359,8 +360,7 @@ async function getLocationAccessToken(
     companyId: connection.company_id,
     locationId: selectedLocationId,
   };
-  const locationTokenHeaders = {
-    Accept: "application/json",
+  const loggedLocationTokenHeaders = {
     Authorization: connection.access_token ? "Bearer [redacted]" : "missing",
     "Content-Type": "application/json",
     Version: API_VERSION,
@@ -370,7 +370,8 @@ async function getLocationAccessToken(
     body: locationTokenBody,
     company_id: connection.company_id,
     endpoint: LOCATION_TOKEN_URL,
-    headers: locationTokenHeaders,
+    hasAccessToken: Boolean(connection.access_token),
+    headers: loggedLocationTokenHeaders,
     method: "POST",
     selected_location_id: selectedLocationId,
   });
@@ -378,8 +379,9 @@ async function getLocationAccessToken(
   const tokenResponse = await fetch(LOCATION_TOKEN_URL, {
     method: "POST",
     headers: {
-      ...locationTokenHeaders,
       Authorization: `Bearer ${connection.access_token}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
     },
     body: JSON.stringify(locationTokenBody),
   });
