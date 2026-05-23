@@ -613,19 +613,19 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
       .select(
         "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, assigned_to, contact_name, contact_email, contact_phone, closing_date, inspection_date, commission, status, sync_status, last_sync_error, last_synced_at, contact_id, ghl_contact_id, ghl_location_id, ghl_opportunity_id, created_at, updated_at",
       )
-      .eq("location_id", LOCATION_ID),
+      .order("updated_at", { ascending: false }),
     client
       .from("tasks")
       .select(
         "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
       )
-      .eq("location_id", LOCATION_ID),
+      .order("created_at", { ascending: false }),
     client
       .from("transaction_documents")
       .select(
         "id, transaction_id, document_type, document_name, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at",
       )
-      .eq("location_id", LOCATION_ID),
+      .order("created_at", { ascending: false }),
   ]);
 
   if (transactionsResult.error || tasksResult.error || documentsResult.error) {

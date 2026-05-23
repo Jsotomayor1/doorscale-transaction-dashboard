@@ -21,8 +21,7 @@ export default async function handler(
 
   const { data, error } = await supabase
     .from("ghl_locations")
-    .select("location_id")
-    .limit(1);
+    .select("connection_status, location_id");
 
   if (error) {
     console.error("DoorScale connection status check failed:", error);
@@ -30,5 +29,16 @@ export default async function handler(
     return;
   }
 
-  response.status(200).json({ connected: Boolean(data?.length) });
+  const rows = data ?? [];
+  const connected = rows.some(
+    (row) =>
+      (row.connection_status === "connected" ||
+        row.connection_status === null) &&
+      !String(row.location_id).startsWith("company:"),
+  );
+  const needsLocationSelection = rows.some(
+    (row) => row.connection_status === "location_selection_required",
+  );
+
+  response.status(200).json({ connected, needsLocationSelection });
 }

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import ChooseAccount from "@/pages/ChooseAccount";
 import Commissions from "@/pages/Commissions";
 import Index from "@/pages/Index";
 import Tasks from "@/pages/Tasks";
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="transactions/:id" element={<TransactionDetail />} />
         <Route path="tasks" element={<Tasks />} />
         <Route path="commissions" element={<Commissions />} />
+        <Route path="choose-account" element={<ChooseAccount />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -89,6 +89,9 @@ async function getConnectedAccount(supabase: ReturnType<typeof createClient>) {
   const { data, error } = await supabase
     .from("ghl_locations")
     .select("access_token, location_id")
+    .or("connection_status.eq.connected,connection_status.is.null")
+    .not("location_id", "like", "company:%")
+    .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

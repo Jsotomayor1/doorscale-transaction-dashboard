@@ -94,6 +94,9 @@ async function getConnectedAccount(supabase: ReturnType<typeof createClient>) {
   const { data, error } = await supabase
     .from("ghl_locations")
     .select("access_token, location_id")
+    .or("connection_status.eq.connected,connection_status.is.null")
+    .not("location_id", "like", "company:%")
+    .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -231,7 +234,7 @@ export default async function handler(
     ghl_location_id: linkedLocationId,
     ghl_opportunity_id: opportunityId ?? null,
     inspection_date: body.inspectionDate || null,
-    location_id: "demo-location",
+    location_id: linkedLocationId ?? "demo-location",
     property_address: body.propertyAddress,
     seller_name: body.sellerName || null,
     stage: body.stage,

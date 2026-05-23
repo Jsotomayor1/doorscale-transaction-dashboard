@@ -12,6 +12,7 @@ import { NavLink } from "@/components/NavLink";
 
 export function AppSidebar() {
   const [isConnected, setIsConnected] = useState(false);
+  const [needsAccountChoice, setNeedsAccountChoice] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
@@ -22,14 +23,19 @@ export function AppSidebar() {
     async function checkStatus() {
       try {
         const response = await fetch("/api/ghl/status");
-        const status = (await response.json()) as { connected?: boolean };
+        const status = (await response.json()) as {
+          connected?: boolean;
+          needsLocationSelection?: boolean;
+        };
 
         if (isMounted) {
           setIsConnected(Boolean(status.connected));
+          setNeedsAccountChoice(Boolean(status.needsLocationSelection));
         }
       } catch {
         if (isMounted) {
           setIsConnected(false);
+          setNeedsAccountChoice(false);
         }
       } finally {
         if (isMounted) {
@@ -47,6 +53,11 @@ export function AppSidebar() {
 
   async function handleConnectionClick() {
     setSyncMessage("");
+
+    if (needsAccountChoice) {
+      window.location.href = "/choose-account";
+      return;
+    }
 
     if (!isConnected) {
       window.location.href = "/api/oauth/connect";
@@ -74,7 +85,9 @@ export function AppSidebar() {
 
   const connectionLabel = isSyncing
     ? "Syncing..."
-    : isConnected
+    : needsAccountChoice
+      ? "Choose DoorScale Account"
+      : isConnected
       ? "Sync DoorScale Data"
       : "Connect DoorScale";
 

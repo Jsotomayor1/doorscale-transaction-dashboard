@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
+const LOCATIONS_URL = "https://services.leadconnectorhq.com/locations/search";
+const API_VERSION = "2021-07-28";
 
 type GhlTokenResponse = {
   access_token?: string;
@@ -14,6 +16,25 @@ type GhlTokenResponse = {
   company_id?: string;
   userId?: string;
   userType?: string;
+  scope?: string;
+  refreshTokenId?: string;
+  isBulkInstallation?: boolean;
+  [key: string]: unknown;
+};
+
+type DoorScaleLocation = {
+  id?: string;
+  _id?: string;
+  locationId?: string;
+  name?: string;
+  businessName?: string;
+  companyId?: string;
+  [key: string]: unknown;
+};
+
+type LocationsResponse = {
+  locations?: DoorScaleLocation[];
+  data?: DoorScaleLocation[];
   [key: string]: unknown;
 };
 
@@ -68,6 +89,63 @@ function redirectWithStatus(
   const redirectUrl = new URL("/", getBaseUrl(request));
   redirectUrl.searchParams.set(status, message);
   response.redirect(302, redirectUrl.toString());
+}
+
+function getLocationId(location: DoorScaleLocation) {
+  return location.id ?? location._id ?? location.locationId;
+}
+
+function getLocationName(location: DoorScaleLocation) {
+  return location.name ?? location.businessName ?? "DoorScale Account";
+}
+
+function getLocations(payload: LocationsResponse) {
+  if (Array.isArray(payload.locations)) return payload.locations;
+  if (Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
+async function fetchAccessibleLocations(
+  accessToken: string,
+  companyId?: string,
+) {
+  const locationsUrl = new URL(LOCATIONS_URL);
+
+  if (companyId) {
+    locationsUrl.searchParams.set("companyId", companyId);
+  }
+
+  console.log("GoHighLevel locations endpoint:", locationsUrl.toString());
+
+  const locationsResponse = await fetch(locationsUrl, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      Version: API_VERSION,
+    },
+  });
+  const rawBody = await locationsResponse.text();
+
+  console.log("GoHighLevel locations response status:", locationsResponse.status);
+  console.log("GoHighLevel locations response body:", rawBody);
+
+  if (!locationsResponse.ok) {
+    return [];
+  }
+
+  try {
+    return getLocations(JSON.parse(rawBody) as LocationsResponse)
+      .map((location) => ({
+        id: getLocationId(location),
+        name: getLocationName(location),
+      }))
+      .filter((location): location is { id: string; name: string } =>
+        Boolean(location.id),
+      );
+  } catch (error) {
+    console.error("GoHighLevel locations response parse failed:", error);
+    return [];
+  }
 }
 
 export default async function handler(
@@ -143,17 +221,6 @@ export default async function handler(
       return;
     }
 
-    const locationId =
-      tokenData.locationId ??
-      tokenData.location_id ??
-      tokenData.companyId ??
-      tokenData.company_id ??
-      tokenData.userId;
-
-    if (!locationId) {
-      throw new Error("HighLevel token response did not include a location, company, or user id.");
-    }
-
     if (!tokenData.access_token || !tokenData.refresh_token) {
       response.status(502).json({
         error: "invalid_token_response",
@@ -162,14 +229,48 @@ export default async function handler(
       return;
     }
 
+    const directLocationId = tokenData.locationId ?? tokenData.location_id;
+    const companyId = tokenData.companyId ?? tokenData.company_id;
+    const needsLocationSelection =
+      !directLocationId ||
+      tokenData.userType?.toLowerCase() === "company" ||
+      tokenData.isBulkInstallation === true;
+    const accessibleLocations = needsLocationSelection
+      ? await fetchAccessibleLocations(tokenData.access_token, companyId)
+      : [];
+    const locationId =
+      directLocationId ??
+      (companyId ? `company:${companyId}` : undefined) ??
+      (tokenData.userId ? `user:${tokenData.userId}` : undefined);
+
+    if (!locationId) {
+      throw new Error("HighLevel token response did not include an install id.");
+    }
+
     const payload = {
       location_id: locationId,
-      location_name: tokenData.userType || "HighLevel Account",
+      location_name: needsLocationSelection
+        ? "DoorScale Account Selection"
+        : "DoorScale Account",
       access_token: tokenData.access_token,
       refresh_token: tokenData.refresh_token,
       expires_at: new Date(
         Date.now() + Number(tokenData.expires_in || 86400) * 1000,
       ).toISOString(),
+      company_id: companyId ?? null,
+      user_id: typeof tokenData.userId === "string" ? tokenData.userId : null,
+      user_type: typeof tokenData.userType === "string" ? tokenData.userType : null,
+      scope: typeof tokenData.scope === "string" ? tokenData.scope : null,
+      refresh_token_id:
+        typeof tokenData.refreshTokenId === "string"
+          ? tokenData.refreshTokenId
+          : null,
+      is_bulk_installation: Boolean(tokenData.isBulkInstallation),
+      connection_status: needsLocationSelection
+        ? "location_selection_required"
+        : "connected",
+      available_locations: accessibleLocations,
+      selected_at: needsLocationSelection ? null : new Date().toISOString(),
     };
 
     console.log("Supabase ghl_locations payload:", {
@@ -198,8 +299,14 @@ export default async function handler(
       return;
     }
 
-    const redirectUrl = new URL("/", getBaseUrl(request));
-    redirectUrl.searchParams.set("oauth_success", "true");
+    const redirectUrl = new URL(
+      needsLocationSelection ? "/choose-account" : "/",
+      getBaseUrl(request),
+    );
+    redirectUrl.searchParams.set(
+      needsLocationSelection ? "connection_ready" : "oauth_success",
+      "true",
+    );
     response.redirect(302, redirectUrl.toString());
   } catch (error) {
     console.error("GoHighLevel OAuth callback unexpected error:", error);

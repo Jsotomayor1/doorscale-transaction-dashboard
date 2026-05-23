@@ -17,6 +17,7 @@ const EXPECTED_FIELD_KEYS = [
 type StoredConnection = {
   access_token: string;
   created_at?: string;
+  connection_status?: string | null;
   location_id: string;
 };
 
@@ -952,7 +953,10 @@ export default async function handler(
 
   const { data: connections, error: connectionError } = await supabase
     .from("ghl_locations")
-    .select("access_token, created_at, location_id")
+    .select("access_token, created_at, connection_status, location_id, selected_at")
+    .or("connection_status.eq.connected,connection_status.is.null")
+    .not("location_id", "like", "company:%")
+    .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1);
 

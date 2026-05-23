@@ -373,6 +373,20 @@
   opacity: 0.62;
 }
 
+.account-selection-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.account-selection-list .card__header {
+  align-items: flex-start;
+}
+
+.account-selection-list svg {
+  color: #1f6f5b;
+}
+
 .stage-update-control {
   display: grid;
   gap: 8px;
