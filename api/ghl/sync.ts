@@ -25,6 +25,8 @@ type StoredConnection = {
   location_refresh_token?: string | null;
   location_token_expires_at?: string | null;
   selected_location_id?: string | null;
+  is_bulk_installation?: boolean | null;
+  user_type?: string | null;
 };
 
 type LocationTokenResponse = {
@@ -304,6 +306,14 @@ function hasUsableLocationToken(connection: StoredConnection) {
   return Number.isFinite(expiresAt) && expiresAt - Date.now() > 5 * 60 * 1000;
 }
 
+function isCompanyInstall(connection: StoredConnection) {
+  return (
+    connection.is_bulk_installation === true ||
+    connection.user_type?.toLowerCase() === "company" ||
+    Boolean(connection.company_id)
+  );
+}
+
 async function getLocationAccessToken(
   supabase: ReturnType<typeof createClient>,
   connection: StoredConnection,
@@ -324,7 +334,7 @@ async function getLocationAccessToken(
     };
   }
 
-  if (!connection.company_id && selectedLocationId) {
+  if (!isCompanyInstall(connection) && selectedLocationId) {
     console.log("DoorScale sync using direct location connection:", {
       selected_location_id: selectedLocationId,
     });
@@ -336,6 +346,12 @@ async function getLocationAccessToken(
   }
 
   if (!connection.company_id || !selectedLocationId) {
+    console.error("DoorScale sync location token missing company/location:", {
+      hasCompanyId: Boolean(connection.company_id),
+      isBulkInstallation: Boolean(connection.is_bulk_installation),
+      selected_location_id: selectedLocationId,
+      userType: connection.user_type,
+    });
     throw new Error("location_token_unavailable");
   }
 
@@ -1094,7 +1110,7 @@ export default async function handler(
   const { data: connections, error: connectionError } = await supabase
     .from("ghl_locations")
     .select(
-      "access_token, company_id, created_at, connection_status, location_access_token, location_refresh_token, location_token_expires_at, location_id, selected_at, selected_location_id",
+      "access_token, company_id, created_at, connection_status, is_bulk_installation, location_access_token, location_refresh_token, location_token_expires_at, location_id, selected_at, selected_location_id, user_type",
     )
     .or("connection_status.eq.connected,connection_status.is.null")
     .not("location_id", "like", "company:%")
@@ -1132,7 +1148,7 @@ export default async function handler(
     console.error("DoorScale sync location token setup failed:", error);
     response.status(409).json({
       ok: false,
-      message: "Please reconnect DoorScale or choose a different DoorScale account.",
+      message: "Please reconnect DoorScale before syncing.",
     });
     return;
   }
