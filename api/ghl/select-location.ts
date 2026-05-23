@@ -9,6 +9,7 @@ type SelectLocationBody = {
 };
 
 type PendingInstall = {
+  id: number;
   access_token: string;
   available_locations?: Array<{ id?: string; name?: string }> | null;
   company_id?: string | null;
@@ -131,7 +132,7 @@ export default async function handler(
   const { data: pendingInstall, error: pendingError } = await supabase
     .from("ghl_locations")
     .select(
-      "access_token, available_locations, company_id, expires_at, is_bulk_installation, location_id, refresh_token, refresh_token_id, scope, user_id, user_type",
+      "id, access_token, available_locations, company_id, expires_at, is_bulk_installation, location_id, refresh_token, refresh_token_id, scope, user_id, user_type",
     )
     .eq("connection_status", "location_selection_required")
     .order("created_at", { ascending: false })
@@ -197,7 +198,7 @@ export default async function handler(
     ).toISOString(),
     location_id: body.locationId,
     location_name: selectedLocation.name || "DoorScale Account",
-    parent_connection_id: install.location_id,
+    parent_connection_id: install.id,
     selected_location_id: body.locationId,
     selected_location_name: selectedLocation.name || "DoorScale Account",
     refresh_token: null,

@@ -24,7 +24,7 @@ type StoredConnection = {
   location_access_token?: string | null;
   location_refresh_token?: string | null;
   location_token_expires_at?: string | null;
-  parent_connection_id?: string | null;
+  parent_connection_id?: number | null;
   selected_location_id?: string | null;
   is_bulk_installation?: boolean | null;
   user_type?: string | null;
@@ -371,8 +371,15 @@ async function getLocationAccessToken(
   let companyAccessToken = connection.access_token;
 
   if (!companyAccessToken) {
-    const parentConnectionId =
-      connection.parent_connection_id ?? `company:${connection.company_id}`;
+    const parentConnectionId = connection.parent_connection_id;
+
+    if (!parentConnectionId) {
+      console.error("DoorScale sync parent company row id is missing:", {
+        selected_location_id: selectedLocationId,
+      });
+      throw new Error("location_token_unavailable");
+    }
+
     console.log("DoorScale sync loading parent company row:", {
       parentConnectionId,
       selected_location_id: selectedLocationId,
@@ -381,7 +388,7 @@ async function getLocationAccessToken(
     const { data: parentConnection, error: parentError } = await supabase
       .from("ghl_locations")
       .select("access_token, location_id")
-      .eq("location_id", parentConnectionId)
+      .eq("id", parentConnectionId)
       .maybeSingle();
 
     if (parentError || !parentConnection?.access_token) {
