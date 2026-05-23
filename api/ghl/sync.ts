@@ -404,15 +404,10 @@ async function getLocationAccessToken(
   };
   const loggedLocationTokenHeaders = {
     Accept: "application/json",
-    Authorization: connection.access_token ? "Bearer [redacted]" : "missing",
-    "Content-Type": "application/x-www-form-urlencoded",
+    Authorization: companyAccessToken ? "Bearer [redacted]" : "missing",
+    "Content-Type": "application/json",
     Version: API_VERSION,
   };
-  const locationTokenBodyParams = new URLSearchParams({
-    appId,
-    companyId: connection.company_id,
-    locationId: selectedLocationId,
-  });
 
   console.log("DoorScale sync location token request:", {
     body: locationTokenBody,
@@ -429,10 +424,10 @@ async function getLocationAccessToken(
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${companyAccessToken}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
       Version: API_VERSION,
     },
-    body: locationTokenBodyParams,
+    body: JSON.stringify(locationTokenBody),
   });
   const rawBody = await tokenResponse.text();
   const tokenData = parseJson<LocationTokenResponse>(rawBody);
