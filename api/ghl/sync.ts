@@ -355,20 +355,33 @@ async function getLocationAccessToken(
     throw new Error("location_token_unavailable");
   }
 
-  console.log("DoorScale sync location token endpoint:", LOCATION_TOKEN_URL);
+  const locationTokenBody = {
+    companyId: connection.company_id,
+    locationId: selectedLocationId,
+  };
+  const locationTokenHeaders = {
+    Accept: "application/json",
+    Authorization: connection.access_token ? "Bearer [redacted]" : "missing",
+    "Content-Type": "application/json",
+    Version: API_VERSION,
+  };
+
+  console.log("DoorScale sync location token request:", {
+    body: locationTokenBody,
+    company_id: connection.company_id,
+    endpoint: LOCATION_TOKEN_URL,
+    headers: locationTokenHeaders,
+    method: "POST",
+    selected_location_id: selectedLocationId,
+  });
 
   const tokenResponse = await fetch(LOCATION_TOKEN_URL, {
     method: "POST",
     headers: {
-      Accept: "application/json",
+      ...locationTokenHeaders,
       Authorization: `Bearer ${connection.access_token}`,
-      "Content-Type": "application/json",
-      Version: API_VERSION,
     },
-    body: JSON.stringify({
-      companyId: connection.company_id,
-      locationId: selectedLocationId,
-    }),
+    body: JSON.stringify(locationTokenBody),
   });
   const rawBody = await tokenResponse.text();
   const tokenData = parseJson<LocationTokenResponse>(rawBody);
@@ -1148,7 +1161,8 @@ export default async function handler(
     console.error("DoorScale sync location token setup failed:", error);
     response.status(409).json({
       ok: false,
-      message: "Please reconnect DoorScale before syncing.",
+      message:
+        "DoorScale could not access the selected account. Please choose another account or reconnect DoorScale.",
     });
     return;
   }
