@@ -127,14 +127,25 @@ function getLocations(payload: LocationsResponse) {
   return [];
 }
 
-async function getInstalledLocations(accessToken: string, companyId: string) {
+async function getInstalledLocations(
+  accessToken: string,
+  companyId: string,
+  appId: string,
+) {
   if (!companyId) {
     console.error("GoHighLevel installed locations missing companyId.");
     throw new Error("HighLevel token response did not include a company id.");
   }
 
+  if (!appId) {
+    console.error("GoHighLevel installed locations missing appId.");
+    throw new Error("HighLevel app id is not configured.");
+  }
+
   const installedLocationsEndpoint = `${INSTALLED_LOCATIONS_URL}?companyId=${encodeURIComponent(
     companyId,
+  )}&appId=${encodeURIComponent(
+    appId,
   )}`;
 
   console.log(
@@ -142,6 +153,7 @@ async function getInstalledLocations(accessToken: string, companyId: string) {
     installedLocationsEndpoint,
   );
   console.log("GoHighLevel installed locations companyId:", companyId);
+  console.log("GoHighLevel installed locations appId:", appId);
 
   const locationsResponse = await fetch(installedLocationsEndpoint, {
     headers: {
@@ -203,6 +215,7 @@ export default async function handler(
   const clientId = process.env.GHL_CLIENT_ID;
   const clientSecret = process.env.GHL_CLIENT_SECRET;
   const redirectUri = process.env.GHL_REDIRECT_URI;
+  const appId = process.env.GHL_APP_ID || process.env.GHL_APP_VERSION_ID;
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -210,6 +223,7 @@ export default async function handler(
     !clientId ||
     !clientSecret ||
     !redirectUri ||
+    !appId ||
     !supabaseUrl ||
     !serviceRoleKey
   ) {
@@ -265,7 +279,7 @@ export default async function handler(
       tokenData.userType?.toLowerCase() === "company" ||
       tokenData.isBulkInstallation === true;
     const installedLocations = needsLocationSelection
-      ? await getInstalledLocations(tokenData.access_token, companyId)
+      ? await getInstalledLocations(tokenData.access_token, companyId, appId)
       : [];
     const locationId =
       directLocationId ??
