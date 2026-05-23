@@ -14,7 +14,6 @@ type GhlTokenResponse = {
   location_id?: string;
   activeLocation?: string;
   companyId?: string;
-  company_id?: string;
   userId?: string;
   userType?: string;
   scope?: string;
@@ -128,22 +127,23 @@ function getLocations(payload: LocationsResponse) {
   return [];
 }
 
-async function getInstalledLocations(accessToken: string, companyId?: string) {
+async function getInstalledLocations(accessToken: string, companyId: string) {
   if (!companyId) {
     console.error("GoHighLevel installed locations missing companyId.");
     throw new Error("HighLevel token response did not include a company id.");
   }
 
-  const installedLocationsUrl = new URL(INSTALLED_LOCATIONS_URL);
-  installedLocationsUrl.searchParams.set("companyId", companyId);
+  const installedLocationsEndpoint = `${INSTALLED_LOCATIONS_URL}?companyId=${encodeURIComponent(
+    companyId,
+  )}`;
 
   console.log(
-    "GoHighLevel installed locations endpoint:",
-    installedLocationsUrl.toString(),
+    "GoHighLevel installed locations final endpoint URL:",
+    installedLocationsEndpoint,
   );
   console.log("GoHighLevel installed locations companyId:", companyId);
 
-  const locationsResponse = await fetch(installedLocationsUrl, {
+  const locationsResponse = await fetch(installedLocationsEndpoint, {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,
@@ -259,7 +259,7 @@ export default async function handler(
     }
 
     const directLocationId = tokenData.locationId ?? tokenData.location_id;
-    const companyId = tokenData.companyId ?? tokenData.company_id;
+    const companyId = tokenData.companyId;
     const needsLocationSelection =
       !directLocationId ||
       tokenData.userType?.toLowerCase() === "company" ||
