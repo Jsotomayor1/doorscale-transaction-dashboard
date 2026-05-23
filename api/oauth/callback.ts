@@ -128,14 +128,25 @@ function getLocations(payload: LocationsResponse) {
   return [];
 }
 
-async function getInstalledLocations(accessToken: string) {
-  console.log("GoHighLevel installed locations endpoint:", INSTALLED_LOCATIONS_URL);
+async function getInstalledLocations(accessToken: string, companyId?: string) {
+  if (!companyId) {
+    console.error("GoHighLevel installed locations missing companyId.");
+    throw new Error("HighLevel token response did not include a company id.");
+  }
 
-  const locationsResponse = await fetch(INSTALLED_LOCATIONS_URL, {
+  const installedLocationsUrl = new URL(INSTALLED_LOCATIONS_URL);
+  installedLocationsUrl.searchParams.set("companyId", companyId);
+
+  console.log(
+    "GoHighLevel installed locations endpoint:",
+    installedLocationsUrl.toString(),
+  );
+  console.log("GoHighLevel installed locations companyId:", companyId);
+
+  const locationsResponse = await fetch(installedLocationsUrl, {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
       Version: API_VERSION,
     },
   });
@@ -254,7 +265,7 @@ export default async function handler(
       tokenData.userType?.toLowerCase() === "company" ||
       tokenData.isBulkInstallation === true;
     const installedLocations = needsLocationSelection
-      ? await getInstalledLocations(tokenData.access_token)
+      ? await getInstalledLocations(tokenData.access_token, companyId)
       : [];
     const locationId =
       directLocationId ??
