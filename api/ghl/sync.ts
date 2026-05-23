@@ -6,6 +6,7 @@ const OPPORTUNITIES_URL =
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
 const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
 const CUSTOM_FIELDS_URL_BASE = "https://services.leadconnectorhq.com";
+const LOCATION_TOKEN_URL = "https://services.leadconnectorhq.com/oauth/locationToken";
 const API_VERSION = "2021-07-28";
 const EXPECTED_FIELD_KEYS = [
   "transaction_type",
@@ -16,9 +17,24 @@ const EXPECTED_FIELD_KEYS = [
 
 type StoredConnection = {
   access_token: string;
+  company_id?: string | null;
   created_at?: string;
   connection_status?: string | null;
   location_id: string;
+  location_access_token?: string | null;
+  location_refresh_token?: string | null;
+  location_token_expires_at?: string | null;
+  selected_location_id?: string | null;
+};
+
+type LocationTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  locationId?: string;
+  refresh_token?: string;
+  token_type?: string;
+  userType?: string;
+  [key: string]: unknown;
 };
 
 type OpportunitiesResponse = {
@@ -253,6 +269,130 @@ function getOpportunities(payload: OpportunitiesResponse) {
   }
 
   return [];
+}
+
+function redactTokenValue(value: unknown) {
+  if (typeof value !== "string") return value;
+  if (value.length <= 12) return "[redacted]";
+
+  return `${value.slice(0, 6)}...[redacted]...${value.slice(-4)}`;
+}
+
+function redactTokens<T extends Record<string, unknown>>(data: T) {
+  return {
+    ...data,
+    access_token: redactTokenValue(data.access_token),
+    refresh_token: redactTokenValue(data.refresh_token),
+  };
+}
+
+function parseJson<T>(rawBody: string) {
+  try {
+    return JSON.parse(rawBody) as T;
+  } catch {
+    return null;
+  }
+}
+
+function hasUsableLocationToken(connection: StoredConnection) {
+  if (!connection.location_access_token || !connection.location_token_expires_at) {
+    return false;
+  }
+
+  const expiresAt = new Date(connection.location_token_expires_at).getTime();
+
+  return Number.isFinite(expiresAt) && expiresAt - Date.now() > 5 * 60 * 1000;
+}
+
+async function getLocationAccessToken(
+  supabase: ReturnType<typeof createClient>,
+  connection: StoredConnection,
+) {
+  const selectedLocationId =
+    connection.selected_location_id ?? connection.location_id;
+
+  console.log("DoorScale sync selected_location_id:", selectedLocationId);
+
+  if (hasUsableLocationToken(connection)) {
+    console.log("DoorScale sync location token reused:", {
+      selected_location_id: selectedLocationId,
+    });
+
+    return {
+      accessToken: connection.location_access_token as string,
+      locationId: selectedLocationId,
+    };
+  }
+
+  if (!connection.company_id && selectedLocationId) {
+    console.log("DoorScale sync using direct location connection:", {
+      selected_location_id: selectedLocationId,
+    });
+
+    return {
+      accessToken: connection.access_token,
+      locationId: selectedLocationId,
+    };
+  }
+
+  if (!connection.company_id || !selectedLocationId) {
+    throw new Error("location_token_unavailable");
+  }
+
+  console.log("DoorScale sync location token endpoint:", LOCATION_TOKEN_URL);
+
+  const tokenResponse = await fetch(LOCATION_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${connection.access_token}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
+    },
+    body: JSON.stringify({
+      companyId: connection.company_id,
+      locationId: selectedLocationId,
+    }),
+  });
+  const rawBody = await tokenResponse.text();
+  const tokenData = parseJson<LocationTokenResponse>(rawBody);
+
+  console.log("DoorScale sync location token response:", {
+    body: tokenData ? redactTokens(tokenData) : rawBody,
+    selected_location_id: selectedLocationId,
+    status: tokenResponse.status,
+  });
+
+  if (!tokenResponse.ok || !tokenData?.access_token) {
+    throw new Error("location_token_unavailable");
+  }
+
+  const expiresAt = new Date(
+    Date.now() + Number(tokenData.expires_in || 86400) * 1000,
+  ).toISOString();
+  const { error } = await supabase
+    .from("ghl_locations")
+    .update({
+      location_access_token: tokenData.access_token,
+      location_refresh_token: tokenData.refresh_token ?? null,
+      location_token_expires_at: expiresAt,
+      selected_location_id: selectedLocationId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("location_id", connection.location_id);
+
+  if (error) {
+    console.error("DoorScale sync location token storage failed:", error);
+  }
+
+  console.log("DoorScale sync location token created:", {
+    selected_location_id: selectedLocationId,
+  });
+
+  return {
+    accessToken: tokenData.access_token,
+    locationId: selectedLocationId,
+  };
 }
 
 function getTasks(payload: TasksResponse) {
@@ -953,7 +1093,9 @@ export default async function handler(
 
   const { data: connections, error: connectionError } = await supabase
     .from("ghl_locations")
-    .select("access_token, created_at, connection_status, location_id, selected_at")
+    .select(
+      "access_token, company_id, created_at, connection_status, location_access_token, location_refresh_token, location_token_expires_at, location_id, selected_at, selected_location_id",
+    )
     .or("connection_status.eq.connected,connection_status.is.null")
     .not("location_id", "like", "company:%")
     .order("selected_at", { ascending: false, nullsFirst: false })
@@ -979,21 +1121,39 @@ export default async function handler(
     return;
   }
 
+  let syncToken: string;
+  let selectedLocationId: string;
+
+  try {
+    const locationToken = await getLocationAccessToken(supabase, connection);
+    syncToken = locationToken.accessToken;
+    selectedLocationId = locationToken.locationId;
+  } catch (error) {
+    console.error("DoorScale sync location token setup failed:", error);
+    response.status(409).json({
+      ok: false,
+      message: "Please reconnect DoorScale or choose a different DoorScale account.",
+    });
+    return;
+  }
+
   const pipelines = await fetchPipelines(
-    connection.access_token,
-    connection.location_id,
+    syncToken,
+    selectedLocationId,
   );
   const fieldMap = await buildFieldMap(
-    connection.access_token,
-    connection.location_id,
+    syncToken,
+    selectedLocationId,
   );
   const opportunitiesUrl = new URL(OPPORTUNITIES_URL);
-  opportunitiesUrl.searchParams.set("location_id", connection.location_id);
+  opportunitiesUrl.searchParams.set("location_id", selectedLocationId);
+
+  console.log("DoorScale sync endpoint called:", opportunitiesUrl.toString());
 
   const opportunitiesResponse = await fetch(opportunitiesUrl, {
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${connection.access_token}`,
+      Authorization: `Bearer ${syncToken}`,
       Version: API_VERSION,
     },
   });
@@ -1089,7 +1249,7 @@ export default async function handler(
     .map((opportunity) =>
       mapOpportunityToTransaction(
         opportunity,
-        connection.location_id,
+        selectedLocationId,
         stageMap,
         fieldMap,
         opportunity.id
@@ -1119,7 +1279,7 @@ export default async function handler(
     const syncedTransactionRows = (syncedTransactions ?? []) as SyncedTransaction[];
     await Promise.all(
       syncedTransactionRows.map((transaction) =>
-        generateDocumentChecklist(supabase, transaction, connection.location_id),
+        generateDocumentChecklist(supabase, transaction, selectedLocationId),
       ),
     );
     const transactionByOpportunityId = new Map(
@@ -1135,16 +1295,13 @@ export default async function handler(
         .filter((transaction) => Boolean(transaction.contact_id))
         .map((transaction) => [transaction.contact_id as string, transaction]),
     );
-    const tasks = await fetchTasks(
-      connection.access_token,
-      connection.location_id,
-    );
+    const tasks = await fetchTasks(syncToken, selectedLocationId);
     const taskPayload = dedupeTasksByExternalId(
       tasks
         .map((task) =>
           mapTaskToPayload(
             task,
-            connection.location_id,
+            selectedLocationId,
             transactionByOpportunityId,
             transactionByContactId,
           ),

@@ -81,6 +81,7 @@ export default async function handler(
     is_bulk_installation: Boolean(install.is_bulk_installation),
     location_id: body.locationId,
     location_name: selectedLocation.name || "DoorScale Account",
+    selected_location_id: body.locationId,
     refresh_token: install.refresh_token,
     refresh_token_id: install.refresh_token_id ?? null,
     scope: install.scope ?? null,
