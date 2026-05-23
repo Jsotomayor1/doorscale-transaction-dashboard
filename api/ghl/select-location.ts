@@ -48,22 +48,20 @@ async function createLocationToken(
   companyAccessToken: string,
   companyId: string,
   locationId: string,
-  appId: string,
 ) {
-  const body = new URLSearchParams({
-    appId,
+  const body = {
     companyId,
     locationId,
-  });
+  };
 
   console.log("DoorScale selected account location token request:", {
-    body: { appId, companyId, locationId },
+    body,
     endpoint: LOCATION_TOKEN_URL,
     hasCompanyAccessToken: Boolean(companyAccessToken),
     headers: {
       Accept: "application/json",
       Authorization: companyAccessToken ? "Bearer [redacted]" : "missing",
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
       Version: API_VERSION,
     },
     method: "POST",
@@ -76,10 +74,10 @@ async function createLocationToken(
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${companyAccessToken}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
       Version: API_VERSION,
     },
-    body,
+    body: JSON.stringify(body),
   });
   const rawBody = await tokenResponse.text();
   let tokenData: LocationTokenResponse | null = null;
@@ -114,9 +112,8 @@ export default async function handler(
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const appId = process.env.GHL_APP_ID || process.env.GHL_APP_VERSION_ID;
 
-  if (!supabaseUrl || !serviceRoleKey || !appId) {
+  if (!supabaseUrl || !serviceRoleKey) {
     response.status(500).json({ message: "Unable to save DoorScale account." });
     return;
   }
@@ -177,7 +174,6 @@ export default async function handler(
       install.access_token,
       install.company_id,
       body.locationId,
-      appId,
     );
   } catch (error) {
     console.error("DoorScale selected account token creation failed:", error);

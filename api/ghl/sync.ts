@@ -318,7 +318,6 @@ function isCompanyInstall(connection: StoredConnection) {
 async function getLocationAccessToken(
   supabase: ReturnType<typeof createClient>,
   connection: StoredConnection,
-  appId: string,
 ) {
   const selectedLocationId = isCompanyInstall(connection)
     ? connection.selected_location_id
@@ -359,7 +358,7 @@ async function getLocationAccessToken(
     };
   }
 
-  if (!connection.company_id || !selectedLocationId || !appId) {
+  if (!connection.company_id || !selectedLocationId) {
     console.error("DoorScale sync location token missing company/location:", {
       hasCompanyId: Boolean(connection.company_id),
       isBulkInstallation: Boolean(connection.is_bulk_installation),
@@ -398,7 +397,6 @@ async function getLocationAccessToken(
   }
 
   const locationTokenBody = {
-    appId,
     companyId: connection.company_id,
     locationId: selectedLocationId,
   };
@@ -1198,10 +1196,8 @@ export default async function handler(
 
   let syncToken: string;
   let selectedLocationId: string;
-  const appId = process.env.GHL_APP_ID || process.env.GHL_APP_VERSION_ID || "";
-
   try {
-    const locationToken = await getLocationAccessToken(supabase, connection, appId);
+    const locationToken = await getLocationAccessToken(supabase, connection);
     syncToken = locationToken.accessToken;
     selectedLocationId = locationToken.locationId;
   } catch (error) {
