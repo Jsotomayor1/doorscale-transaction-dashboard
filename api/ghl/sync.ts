@@ -361,10 +361,15 @@ async function getLocationAccessToken(
     locationId: selectedLocationId,
   };
   const loggedLocationTokenHeaders = {
+    Accept: "application/json",
     Authorization: connection.access_token ? "Bearer [redacted]" : "missing",
-    "Content-Type": "application/json",
+    "Content-Type": "application/x-www-form-urlencoded",
     Version: API_VERSION,
   };
+  const locationTokenBodyParams = new URLSearchParams({
+    companyId: connection.company_id,
+    locationId: selectedLocationId,
+  });
 
   console.log("DoorScale sync location token request:", {
     body: locationTokenBody,
@@ -379,11 +384,12 @@ async function getLocationAccessToken(
   const tokenResponse = await fetch(LOCATION_TOKEN_URL, {
     method: "POST",
     headers: {
+      Accept: "application/json",
       Authorization: `Bearer ${connection.access_token}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
       Version: API_VERSION,
     },
-    body: JSON.stringify(locationTokenBody),
+    body: locationTokenBodyParams,
   });
   const rawBody = await tokenResponse.text();
   const tokenData = parseJson<LocationTokenResponse>(rawBody);
@@ -1164,7 +1170,7 @@ export default async function handler(
     response.status(409).json({
       ok: false,
       message:
-        "DoorScale could not access the selected account. Please choose another account or reconnect DoorScale.",
+        "Unable to access this DoorScale account. Please reconnect DoorScale.",
     });
     return;
   }

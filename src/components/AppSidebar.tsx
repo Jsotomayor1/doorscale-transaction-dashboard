@@ -70,14 +70,23 @@ export function AppSidebar() {
       const response = await fetch("/api/ghl/sync", {
         method: "POST",
       });
+      const result = (await response.json().catch(() => ({}))) as {
+        message?: string;
+      };
 
       if (!response.ok) {
-        throw new Error("Unable to sync DoorScale data.");
+        throw new Error(
+          result.message || "Unable to sync DoorScale data.",
+        );
       }
 
-      setSyncMessage("DoorScale data synced successfully.");
-    } catch {
-      setSyncMessage("Unable to sync DoorScale data.");
+      setSyncMessage(result.message || "DoorScale data synced successfully.");
+    } catch (error) {
+      setSyncMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to sync DoorScale data.",
+      );
     } finally {
       setIsSyncing(false);
     }

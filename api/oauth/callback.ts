@@ -2,7 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
-const LOCATIONS_URL = "https://services.leadconnectorhq.com/locations/search";
+const INSTALLED_LOCATIONS_URL =
+  "https://services.leadconnectorhq.com/oauth/installedLocations";
 const API_VERSION = "2021-07-28";
 
 type GhlTokenResponse = {
@@ -29,10 +30,18 @@ type DoorScaleLocation = {
   name?: string;
   businessName?: string;
   companyId?: string;
+  location?: {
+    id?: string;
+    name?: string;
+  };
+  locationName?: string;
+  location_id?: string;
   [key: string]: unknown;
 };
 
 type LocationsResponse = {
+  installedLocations?: DoorScaleLocation[];
+  installations?: DoorScaleLocation[];
   locations?: DoorScaleLocation[];
   data?: DoorScaleLocation[];
   [key: string]: unknown;
@@ -92,42 +101,51 @@ function redirectWithStatus(
 }
 
 function getLocationId(location: DoorScaleLocation) {
-  return location.id ?? location._id ?? location.locationId;
+  return (
+    location.id ??
+    location._id ??
+    location.locationId ??
+    location.location_id ??
+    location.location?.id
+  );
 }
 
 function getLocationName(location: DoorScaleLocation) {
-  return location.name ?? location.businessName ?? "DoorScale Account";
+  return (
+    location.name ??
+    location.businessName ??
+    location.locationName ??
+    location.location?.name ??
+    "DoorScale Account"
+  );
 }
 
 function getLocations(payload: LocationsResponse) {
+  if (Array.isArray(payload.installedLocations)) return payload.installedLocations;
+  if (Array.isArray(payload.installations)) return payload.installations;
   if (Array.isArray(payload.locations)) return payload.locations;
   if (Array.isArray(payload.data)) return payload.data;
   return [];
 }
 
-async function fetchAccessibleLocations(
-  accessToken: string,
-  companyId?: string,
-) {
-  const locationsUrl = new URL(LOCATIONS_URL);
+async function getInstalledLocations(accessToken: string) {
+  console.log("GoHighLevel installed locations endpoint:", INSTALLED_LOCATIONS_URL);
 
-  if (companyId) {
-    locationsUrl.searchParams.set("companyId", companyId);
-  }
-
-  console.log("GoHighLevel locations endpoint:", locationsUrl.toString());
-
-  const locationsResponse = await fetch(locationsUrl, {
+  const locationsResponse = await fetch(INSTALLED_LOCATIONS_URL, {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
       Version: API_VERSION,
     },
   });
   const rawBody = await locationsResponse.text();
 
-  console.log("GoHighLevel locations response status:", locationsResponse.status);
-  console.log("GoHighLevel locations response body:", rawBody);
+  console.log(
+    "GoHighLevel installed locations response status:",
+    locationsResponse.status,
+  );
+  console.log("GoHighLevel installed locations response body:", rawBody);
 
   if (!locationsResponse.ok) {
     return [];
@@ -143,7 +161,7 @@ async function fetchAccessibleLocations(
         Boolean(location.id),
       );
   } catch (error) {
-    console.error("GoHighLevel locations response parse failed:", error);
+    console.error("GoHighLevel installed locations response parse failed:", error);
     return [];
   }
 }
@@ -235,8 +253,8 @@ export default async function handler(
       !directLocationId ||
       tokenData.userType?.toLowerCase() === "company" ||
       tokenData.isBulkInstallation === true;
-    const accessibleLocations = needsLocationSelection
-      ? await fetchAccessibleLocations(tokenData.access_token, companyId)
+    const installedLocations = needsLocationSelection
+      ? await getInstalledLocations(tokenData.access_token)
       : [];
     const locationId =
       directLocationId ??
@@ -269,7 +287,7 @@ export default async function handler(
       connection_status: needsLocationSelection
         ? "location_selection_required"
         : "connected",
-      available_locations: accessibleLocations,
+      available_locations: installedLocations,
       selected_at: needsLocationSelection ? null : new Date().toISOString(),
     };
 

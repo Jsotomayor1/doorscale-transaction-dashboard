@@ -82,6 +82,7 @@ export default async function handler(
     location_id: body.locationId,
     location_name: selectedLocation.name || "DoorScale Account",
     selected_location_id: body.locationId,
+    selected_location_name: selectedLocation.name || "DoorScale Account",
     refresh_token: install.refresh_token,
     refresh_token_id: install.refresh_token_id ?? null,
     scope: install.scope ?? null,

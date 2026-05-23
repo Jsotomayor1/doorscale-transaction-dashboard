@@ -105,7 +105,7 @@ export default function ChooseAccount() {
       <header className="dashboard__header">
         <div>
           <p className="dashboard__eyebrow">DoorScale connection</p>
-          <h2>Choose Your DoorScale Account</h2>
+          <h2>Choose DoorScale Account</h2>
           <span>Select the account that should power this dashboard.</span>
         </div>
       </header>
@@ -123,7 +123,7 @@ export default function ChooseAccount() {
               <div>
                 <CardTitle>{location.name}</CardTitle>
                 <CardDescription>
-                  Use this DoorScale account for transactions, tasks, and sync.
+                  Use this DoorScale account for transactions and tasks.
                 </CardDescription>
               </div>
               <Building2 size={22} />
