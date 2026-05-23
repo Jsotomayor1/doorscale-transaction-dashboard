@@ -1,6 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
+const LOCATION_TOKEN_URL = "https://services.leadconnectorhq.com/oauth/locationToken";
+const API_VERSION = "2021-07-28";
+
 type SelectLocationBody = {
   locationId?: string;
 };
@@ -19,6 +22,87 @@ type PendingInstall = {
   user_type?: string | null;
 };
 
+type LocationTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  [key: string]: unknown;
+};
+
+function redactTokenValue(value: unknown) {
+  if (typeof value !== "string") return value;
+  if (value.length <= 12) return "[redacted]";
+
+  return `${value.slice(0, 6)}...[redacted]...${value.slice(-4)}`;
+}
+
+function redactTokens<T extends Record<string, unknown>>(data: T) {
+  return {
+    ...data,
+    access_token: redactTokenValue(data.access_token),
+    refresh_token: redactTokenValue(data.refresh_token),
+  };
+}
+
+async function createLocationToken(
+  companyAccessToken: string,
+  companyId: string,
+  locationId: string,
+  appId: string,
+) {
+  const body = new URLSearchParams({
+    appId,
+    companyId,
+    locationId,
+  });
+
+  console.log("DoorScale selected account location token request:", {
+    body: { appId, companyId, locationId },
+    endpoint: LOCATION_TOKEN_URL,
+    hasCompanyAccessToken: Boolean(companyAccessToken),
+    headers: {
+      Accept: "application/json",
+      Authorization: companyAccessToken ? "Bearer [redacted]" : "missing",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Version: API_VERSION,
+    },
+    method: "POST",
+    parentCompanyId: companyId,
+    selectedLocationId: locationId,
+  });
+
+  const tokenResponse = await fetch(LOCATION_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${companyAccessToken}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Version: API_VERSION,
+    },
+    body,
+  });
+  const rawBody = await tokenResponse.text();
+  let tokenData: LocationTokenResponse | null = null;
+
+  try {
+    tokenData = JSON.parse(rawBody) as LocationTokenResponse;
+  } catch {
+    tokenData = null;
+  }
+
+  console.log("DoorScale selected account location token response:", {
+    body: tokenData ? redactTokens(tokenData) : rawBody,
+    selectedLocationId: locationId,
+    status: tokenResponse.status,
+  });
+
+  if (!tokenResponse.ok || !tokenData?.access_token) {
+    throw new Error("location_token_unavailable");
+  }
+
+  return tokenData;
+}
+
 export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
@@ -30,8 +114,9 @@ export default async function handler(
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const appId = process.env.GHL_APP_ID || process.env.GHL_APP_VERSION_ID;
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !serviceRoleKey || !appId) {
     response.status(500).json({ message: "Unable to save DoorScale account." });
     return;
   }
@@ -72,18 +157,54 @@ export default async function handler(
     return;
   }
 
+  if (!install.access_token || !install.company_id) {
+    console.error("DoorScale selected account missing parent company data:", {
+      hasCompanyAccessToken: Boolean(install.access_token),
+      parentConnectionId: install.location_id,
+      companyId: install.company_id,
+      selectedLocationId: body.locationId,
+    });
+    response.status(409).json({
+      message: "Unable to access this DoorScale account. Please reconnect DoorScale.",
+    });
+    return;
+  }
+
+  let locationToken: LocationTokenResponse;
+
+  try {
+    locationToken = await createLocationToken(
+      install.access_token,
+      install.company_id,
+      body.locationId,
+      appId,
+    );
+  } catch (error) {
+    console.error("DoorScale selected account token creation failed:", error);
+    response.status(409).json({
+      message: "Unable to access this DoorScale account. Please reconnect DoorScale.",
+    });
+    return;
+  }
+
   const selectedPayload = {
-    access_token: install.access_token,
+    access_token: null,
     available_locations: [],
     company_id: install.company_id ?? null,
     connection_status: "connected",
     expires_at: install.expires_at,
     is_bulk_installation: Boolean(install.is_bulk_installation),
+    location_access_token: locationToken.access_token,
+    location_refresh_token: locationToken.refresh_token ?? null,
+    location_token_expires_at: new Date(
+      Date.now() + Number(locationToken.expires_in || 86400) * 1000,
+    ).toISOString(),
     location_id: body.locationId,
     location_name: selectedLocation.name || "DoorScale Account",
+    parent_connection_id: install.location_id,
     selected_location_id: body.locationId,
     selected_location_name: selectedLocation.name || "DoorScale Account",
-    refresh_token: install.refresh_token,
+    refresh_token: null,
     refresh_token_id: install.refresh_token_id ?? null,
     scope: install.scope ?? null,
     selected_at: new Date().toISOString(),
@@ -105,7 +226,7 @@ export default async function handler(
   const { error: installUpdateError } = await supabase
     .from("ghl_locations")
     .update({
-      connection_status: "location_selected",
+      connection_status: "company_connected",
       selected_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

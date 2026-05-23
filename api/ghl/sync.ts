@@ -16,7 +16,7 @@ const EXPECTED_FIELD_KEYS = [
 ] as const;
 
 type StoredConnection = {
-  access_token: string;
+  access_token?: string | null;
   company_id?: string | null;
   created_at?: string;
   connection_status?: string | null;
@@ -24,6 +24,7 @@ type StoredConnection = {
   location_access_token?: string | null;
   location_refresh_token?: string | null;
   location_token_expires_at?: string | null;
+  parent_connection_id?: string | null;
   selected_location_id?: string | null;
   is_bulk_installation?: boolean | null;
   user_type?: string | null;
@@ -317,12 +318,20 @@ function isCompanyInstall(connection: StoredConnection) {
 async function getLocationAccessToken(
   supabase: ReturnType<typeof createClient>,
   connection: StoredConnection,
+  appId: string,
 ) {
   const selectedLocationId = isCompanyInstall(connection)
     ? connection.selected_location_id
     : connection.selected_location_id ?? connection.location_id;
 
   console.log("DoorScale sync selected_location_id:", selectedLocationId);
+  console.log("DoorScale sync selected account token state:", {
+    hasCompanyAccessToken: Boolean(connection.access_token),
+    hasLocationAccessToken: Boolean(connection.location_access_token),
+    parentConnectionId: connection.parent_connection_id ?? null,
+    selected_location_id: selectedLocationId,
+    tokenType: connection.location_access_token ? "location" : "missing",
+  });
 
   if (selectedLocationId && hasUsableLocationToken(connection)) {
     console.log("DoorScale sync location token reused:", {
@@ -336,6 +345,10 @@ async function getLocationAccessToken(
   }
 
   if (!isCompanyInstall(connection) && selectedLocationId) {
+    if (!connection.access_token) {
+      throw new Error("location_token_unavailable");
+    }
+
     console.log("DoorScale sync using direct location connection:", {
       selected_location_id: selectedLocationId,
     });
@@ -346,7 +359,7 @@ async function getLocationAccessToken(
     };
   }
 
-  if (!connection.company_id || !selectedLocationId) {
+  if (!connection.company_id || !selectedLocationId || !appId) {
     console.error("DoorScale sync location token missing company/location:", {
       hasCompanyId: Boolean(connection.company_id),
       isBulkInstallation: Boolean(connection.is_bulk_installation),
@@ -356,7 +369,36 @@ async function getLocationAccessToken(
     throw new Error("location_token_unavailable");
   }
 
+  let companyAccessToken = connection.access_token;
+
+  if (!companyAccessToken) {
+    const parentConnectionId =
+      connection.parent_connection_id ?? `company:${connection.company_id}`;
+    console.log("DoorScale sync loading parent company row:", {
+      parentConnectionId,
+      selected_location_id: selectedLocationId,
+    });
+
+    const { data: parentConnection, error: parentError } = await supabase
+      .from("ghl_locations")
+      .select("access_token, location_id")
+      .eq("location_id", parentConnectionId)
+      .maybeSingle();
+
+    if (parentError || !parentConnection?.access_token) {
+      console.error("DoorScale sync parent company row lookup failed:", {
+        error: parentError,
+        parentConnectionId,
+        selected_location_id: selectedLocationId,
+      });
+      throw new Error("location_token_unavailable");
+    }
+
+    companyAccessToken = parentConnection.access_token as string;
+  }
+
   const locationTokenBody = {
+    appId,
     companyId: connection.company_id,
     locationId: selectedLocationId,
   };
@@ -367,6 +409,7 @@ async function getLocationAccessToken(
     Version: API_VERSION,
   };
   const locationTokenBodyParams = new URLSearchParams({
+    appId,
     companyId: connection.company_id,
     locationId: selectedLocationId,
   });
@@ -375,7 +418,7 @@ async function getLocationAccessToken(
     body: locationTokenBody,
     company_id: connection.company_id,
     endpoint: LOCATION_TOKEN_URL,
-    hasAccessToken: Boolean(connection.access_token),
+    hasAccessToken: Boolean(companyAccessToken),
     headers: loggedLocationTokenHeaders,
     method: "POST",
     selected_location_id: selectedLocationId,
@@ -385,7 +428,7 @@ async function getLocationAccessToken(
     method: "POST",
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${connection.access_token}`,
+      Authorization: `Bearer ${companyAccessToken}`,
       "Content-Type": "application/x-www-form-urlencoded",
       Version: API_VERSION,
     },
@@ -1131,7 +1174,7 @@ export default async function handler(
   const { data: connections, error: connectionError } = await supabase
     .from("ghl_locations")
     .select(
-      "access_token, company_id, created_at, connection_status, is_bulk_installation, location_access_token, location_refresh_token, location_token_expires_at, location_id, selected_at, selected_location_id, user_type",
+      "access_token, company_id, created_at, connection_status, is_bulk_installation, location_access_token, location_refresh_token, location_token_expires_at, location_id, parent_connection_id, selected_at, selected_location_id, user_type",
     )
     .or("connection_status.eq.connected,connection_status.is.null")
     .not("location_id", "like", "company:%")
@@ -1150,7 +1193,7 @@ export default async function handler(
 
   const connection = connections?.[0] as StoredConnection | undefined;
 
-  if (!connection?.access_token) {
+  if (!connection) {
     response.status(404).json({
       ok: false,
       message: "DoorScale account is not connected.",
@@ -1160,9 +1203,10 @@ export default async function handler(
 
   let syncToken: string;
   let selectedLocationId: string;
+  const appId = process.env.GHL_APP_ID || process.env.GHL_APP_VERSION_ID || "";
 
   try {
-    const locationToken = await getLocationAccessToken(supabase, connection);
+    const locationToken = await getLocationAccessToken(supabase, connection, appId);
     syncToken = locationToken.accessToken;
     selectedLocationId = locationToken.locationId;
   } catch (error) {
