@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { NavLink as RouterNavLink } from "react-router-dom";
+import { withActiveLocationPath } from "@/lib/active-location";
 import { cn } from "@/lib/utils";
 
 type NavLinkProps = {
@@ -15,7 +16,7 @@ export function NavLink({ to, icon, children }: NavLinkProps) {
         cn("sidebar__link", isActive && "sidebar__link--active")
       }
       end={to === "/"}
-      to={to}
+      to={withActiveLocationPath(to)}
     >
       <span className="sidebar__link-icon">{icon}</span>
       <span>{children}</span>

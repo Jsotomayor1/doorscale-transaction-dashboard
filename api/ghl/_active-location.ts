@@ -3,17 +3,20 @@ import type { VercelRequest } from "@vercel/node";
 
 export type ActiveLocation = {
   access_token: string;
+  activeLocationId: string;
+  connection: LocationRow;
   id: number | string;
   location_id: string;
   location_name: string;
 };
 
-type LocationRow = {
+export type LocationRow = {
   access_token: string | null;
   connection_status: string | null;
   id: number | string;
   location_id: string;
   location_name: string | null;
+  user_type: string | null;
 };
 
 type RequestBody = {
@@ -51,19 +54,18 @@ export async function getActiveLocation(
   routeName: string,
 ): Promise<ActiveLocation> {
   const requestedLocationId = getRequestedLocationId(request);
-  let query = supabase
-    .from("ghl_locations")
-    .select("access_token, connection_status, id, location_id, location_name")
-    .or("connection_status.eq.connected,connection_status.is.null")
-    .not("location_id", "like", "company:%");
 
-  if (requestedLocationId) {
-    query = query.eq("location_id", requestedLocationId);
+  if (!requestedLocationId) {
+    console.error("DoorScale active account missing location:", { routeName });
+    throw new Error("active_location_required");
   }
 
-  const { data, error } = await query
-    .order("selected_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
+  const { data, error } = await supabase
+    .from("ghl_locations")
+    .select("access_token, connection_status, id, location_id, location_name, user_type")
+    .eq("location_id", requestedLocationId)
+    .eq("user_type", "PrivateIntegration")
+    .maybeSingle();
 
   if (error) {
     console.error("DoorScale active account lookup failed:", {
@@ -74,26 +76,26 @@ export async function getActiveLocation(
     throw new Error("active_location_lookup_failed");
   }
 
-  const rows = (data ?? []) as LocationRow[];
+  const row = data as LocationRow | null;
 
   console.log("DoorScale active account lookup:", {
-    connectedLocationCount: rows.length,
+    foundConnection: Boolean(row),
     requestedLocationId: requestedLocationId || null,
     routeName,
   });
 
-  if (!requestedLocationId && rows.length > 1) {
-    throw new Error("active_location_required");
-  }
-
-  const row = rows[0];
-
   if (!row?.location_id || !row.access_token) {
+    console.error("DoorScale active account not connected:", {
+      activeLocationId: requestedLocationId,
+      routeName,
+    });
     throw new Error("active_location_not_connected");
   }
 
   return {
     access_token: row.access_token,
+    activeLocationId: row.location_id,
+    connection: row,
     id: row.id,
     location_id: row.location_id,
     location_name: row.location_name || "DoorScale Account",

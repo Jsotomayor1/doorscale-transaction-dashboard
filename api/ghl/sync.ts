@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getActiveLocation, logRouteDataCounts } from "./_active-location";
+import { getActiveLocation, logRouteDataCounts } from "./_active-location.js";
 
 const OPPORTUNITIES_URL =
   "https://services.leadconnectorhq.com/opportunities/search";

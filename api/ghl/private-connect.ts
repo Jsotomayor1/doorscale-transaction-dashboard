@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { getRequestedLocationId } from "./_active-location.js";
 
 type PrivateConnectBody = {
   accountName?: string;
@@ -26,7 +27,7 @@ export default async function handler(
 
   const body = request.body as PrivateConnectBody;
   const accountName = body.accountName?.trim();
-  const locationId = body.locationId?.trim();
+  const locationId = getRequestedLocationId(request);
   const privateIntegrationToken = body.privateIntegrationToken?.trim();
 
   if (!accountName || !locationId || !privateIntegrationToken) {

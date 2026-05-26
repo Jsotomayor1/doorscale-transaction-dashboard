@@ -16,6 +16,7 @@ import {
   type TransactionStage,
   useCRMData,
 } from "@/hooks/use-crm-data";
+import { withActiveLocationPath } from "@/lib/active-location";
 import { formatCurrency } from "@/lib/utils";
 
 function formatDate(dateValue: string) {
@@ -117,7 +118,7 @@ export default function Transactions() {
             aria-label={`Open transaction ${transaction.propertyAddress}`}
             className="transaction-card-link"
             key={transaction.id}
-            to={`/transactions/${transaction.id}`}
+            to={withActiveLocationPath(`/transactions/${transaction.id}`)}
           >
             <Card>
               <CardHeader>

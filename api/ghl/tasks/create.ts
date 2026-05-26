@@ -4,7 +4,7 @@ import {
   getActiveLocation,
   getRequestedLocationId,
   logRouteDataCounts,
-} from "../_active-location";
+} from "../_active-location.js";
 
 const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
 const API_VERSION = "2021-07-28";

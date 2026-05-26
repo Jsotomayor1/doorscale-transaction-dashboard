@@ -1,0 +1,720 @@
+﻿diff --git a/api/ghl/_active-location.ts b/api/ghl/_active-location.ts
+index 499dd5c..57afee9 100644
+--- a/api/ghl/_active-location.ts
++++ b/api/ghl/_active-location.ts
+@@ -3,17 +3,20 @@ import type { VercelRequest } from "@vercel/node";
+ 
+ export type ActiveLocation = {
+   access_token: string;
++  activeLocationId: string;
++  connection: LocationRow;
+   id: number | string;
+   location_id: string;
+   location_name: string;
+ };
+ 
+-type LocationRow = {
++export type LocationRow = {
+   access_token: string | null;
+   connection_status: string | null;
+   id: number | string;
+   location_id: string;
+   location_name: string | null;
++  user_type: string | null;
+ };
+ 
+ type RequestBody = {
+@@ -51,19 +54,18 @@ export async function getActiveLocation(
+   routeName: string,
+ ): Promise<ActiveLocation> {
+   const requestedLocationId = getRequestedLocationId(request);
+-  let query = supabase
+-    .from("ghl_locations")
+-    .select("access_token, connection_status, id, location_id, location_name")
+-    .or("connection_status.eq.connected,connection_status.is.null")
+-    .not("location_id", "like", "company:%");
+ 
+-  if (requestedLocationId) {
+-    query = query.eq("location_id", requestedLocationId);
++  if (!requestedLocationId) {
++    console.error("DoorScale active account missing location:", { routeName });
++    throw new Error("active_location_required");
+   }
+ 
+-  const { data, error } = await query
+-    .order("selected_at", { ascending: false, nullsFirst: false })
+-    .order("created_at", { ascending: false });
++  const { data, error } = await supabase
++    .from("ghl_locations")
++    .select("access_token, connection_status, id, location_id, location_name, user_type")
++    .eq("location_id", requestedLocationId)
++    .eq("user_type", "PrivateIntegration")
++    .maybeSingle();
+ 
+   if (error) {
+     console.error("DoorScale active account lookup failed:", {
+@@ -74,26 +76,26 @@ export async function getActiveLocation(
+     throw new Error("active_location_lookup_failed");
+   }
+ 
+-  const rows = (data ?? []) as LocationRow[];
++  const row = data as LocationRow | null;
+ 
+   console.log("DoorScale active account lookup:", {
+-    connectedLocationCount: rows.length,
++    foundConnection: Boolean(row),
+     requestedLocationId: requestedLocationId || null,
+     routeName,
+   });
+ 
+-  if (!requestedLocationId && rows.length > 1) {
+-    throw new Error("active_location_required");
+-  }
+-
+-  const row = rows[0];
+-
+   if (!row?.location_id || !row.access_token) {
++    console.error("DoorScale active account not connected:", {
++      activeLocationId: requestedLocationId,
++      routeName,
++    });
+     throw new Error("active_location_not_connected");
+   }
+ 
+   return {
+     access_token: row.access_token,
++    activeLocationId: row.location_id,
++    connection: row,
+     id: row.id,
+     location_id: row.location_id,
+     location_name: row.location_name || "DoorScale Account",
+diff --git a/api/ghl/private-connect.ts b/api/ghl/private-connect.ts
+index eef81bf..89b162f 100644
+--- a/api/ghl/private-connect.ts
++++ b/api/ghl/private-connect.ts
+@@ -1,5 +1,6 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
++import { getRequestedLocationId } from "./_active-location.js";
+ 
+ type PrivateConnectBody = {
+   accountName?: string;
+@@ -26,7 +27,7 @@ export default async function handler(
+ 
+   const body = request.body as PrivateConnectBody;
+   const accountName = body.accountName?.trim();
+-  const locationId = body.locationId?.trim();
++  const locationId = getRequestedLocationId(request);
+   const privateIntegrationToken = body.privateIntegrationToken?.trim();
+ 
+   if (!accountName || !locationId || !privateIntegrationToken) {
+diff --git a/api/ghl/status.ts b/api/ghl/status.ts
+index eb6e96b..04617c5 100644
+--- a/api/ghl/status.ts
++++ b/api/ghl/status.ts
+@@ -1,8 +1,9 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
++import { getRequestedLocationId } from "./_active-location.js";
+ 
+ export default async function handler(
+-  _request: VercelRequest,
++  request: VercelRequest,
+   response: VercelResponse,
+ ) {
+   const supabaseUrl = process.env.VITE_SUPABASE_URL;
+@@ -18,12 +19,19 @@ export default async function handler(
+       persistSession: false,
+     },
+   });
++  const activeLocationId = getRequestedLocationId(request);
++
++  if (!activeLocationId) {
++    response.status(200).json({ connected: false, locationRequired: true });
++    return;
++  }
+ 
+   const { data, error } = await supabase
+     .from("ghl_locations")
+-    .select("connection_status, location_id, location_name, selected_at")
+-    .order("selected_at", { ascending: false, nullsFirst: false })
+-    .order("created_at", { ascending: false });
++    .select("connection_status, location_id, location_name, selected_at, user_type")
++    .eq("location_id", activeLocationId)
++    .eq("user_type", "PrivateIntegration")
++    .maybeSingle();
+ 
+   if (error) {
+     console.error("DoorScale connection status check failed:", error);
+@@ -31,32 +39,19 @@ export default async function handler(
+     return;
+   }
+ 
+-  const rows = data ?? [];
+-  const connected = rows.some(
+-    (row) =>
+-      (row.connection_status === "connected" ||
+-        row.connection_status === null) &&
+-      !String(row.location_id).startsWith("company:"),
+-  );
+-  const needsLocationSelection = rows.some(
+-    (row) => row.connection_status === "location_selection_required",
+-  );
+-  const locations = rows
+-    .filter(
+-      (row) =>
+-        (row.connection_status === "connected" ||
+-          row.connection_status === null) &&
+-        !String(row.location_id).startsWith("company:"),
+-    )
+-    .map((row) => ({
+-      id: row.location_id,
+-      name: row.location_name || "DoorScale Account",
+-    }));
++  const connected =
++    Boolean(data) &&
++    (data.connection_status === "connected" || data.connection_status === null);
++
++  console.log("DoorScale status check:", {
++    activeLocationId,
++    connected,
++    routeName: "/api/ghl/status",
++  });
+ 
+   response.status(200).json({
+-    activeLocationId: locations[0]?.id ?? "",
++    activeLocationId,
+     connected,
+-    locations,
+-    needsLocationSelection,
++    locationName: data?.location_name || "",
+   });
+ }
+diff --git a/api/ghl/sync.ts b/api/ghl/sync.ts
+index 4b206b2..b7cf587 100644
+--- a/api/ghl/sync.ts
++++ b/api/ghl/sync.ts
+@@ -1,6 +1,6 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
+-import { getActiveLocation, logRouteDataCounts } from "./_active-location";
++import { getActiveLocation, logRouteDataCounts } from "./_active-location.js";
+ 
+ const OPPORTUNITIES_URL =
+   "https://services.leadconnectorhq.com/opportunities/search";
+diff --git a/api/ghl/tasks/create.ts b/api/ghl/tasks/create.ts
+index 6c3c40b..427b007 100644
+--- a/api/ghl/tasks/create.ts
++++ b/api/ghl/tasks/create.ts
+@@ -4,7 +4,7 @@ import {
+   getActiveLocation,
+   getRequestedLocationId,
+   logRouteDataCounts,
+-} from "../_active-location";
++} from "../_active-location.js";
+ 
+ const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
+ const API_VERSION = "2021-07-28";
+diff --git a/api/ghl/tasks/update.ts b/api/ghl/tasks/update.ts
+index c111508..4d79e67 100644
+--- a/api/ghl/tasks/update.ts
++++ b/api/ghl/tasks/update.ts
+@@ -4,7 +4,7 @@ import {
+   getActiveLocation,
+   getRequestedLocationId,
+   logRouteDataCounts,
+-} from "../_active-location";
++} from "../_active-location.js";
+ 
+ const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
+ const API_VERSION = "2021-07-28";
+diff --git a/api/ghl/transactions/create.ts b/api/ghl/transactions/create.ts
+index 1cfbf08..a81fab1 100644
+--- a/api/ghl/transactions/create.ts
++++ b/api/ghl/transactions/create.ts
+@@ -4,7 +4,7 @@ import {
+   getActiveLocation,
+   getRequestedLocationId,
+   logRouteDataCounts,
+-} from "../_active-location";
++} from "../_active-location.js";
+ 
+ const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
+ const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
+diff --git a/api/ghl/transactions/update.ts b/api/ghl/transactions/update.ts
+index 606d1eb..62b28e4 100644
+--- a/api/ghl/transactions/update.ts
++++ b/api/ghl/transactions/update.ts
+@@ -4,7 +4,7 @@ import {
+   getActiveLocation,
+   getRequestedLocationId,
+   logRouteDataCounts,
+-} from "../_active-location";
++} from "../_active-location.js";
+ 
+ const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities";
+ const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
+diff --git a/src/App.css b/src/App.css
+index ef433a4..14867bb 100644
+--- a/src/App.css
++++ b/src/App.css
+@@ -13,34 +13,6 @@
+   padding: 32px;
+ }
+ 
+-.account-selector {
+-  display: flex;
+-  justify-content: flex-end;
+-  margin-bottom: 14px;
+-}
+-
+-.account-selector label {
+-  display: grid;
+-  gap: 6px;
+-  min-width: min(320px, 100%);
+-}
+-
+-.account-selector span {
+-  color: #475569;
+-  font-size: 0.82rem;
+-  font-weight: 800;
+-}
+-
+-.account-selector select {
+-  min-height: 40px;
+-  border: 1px solid #cbd5e1;
+-  border-radius: 8px;
+-  padding: 0 12px;
+-  color: #17202a;
+-  background: #ffffff;
+-  font-weight: 750;
+-}
+-
+ .sidebar {
+   position: sticky;
+   top: 0;
+diff --git a/src/App.tsx b/src/App.tsx
+index 63c970f..26421f8 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,4 +1,5 @@
+ import { Navigate, Route, Routes } from "react-router-dom";
++import { DoorScaleGate } from "@/components/DoorScaleGate";
+ import { Layout } from "@/components/Layout";
+ import ChooseAccount from "@/pages/ChooseAccount";
+ import Commissions from "@/pages/Commissions";
+@@ -13,11 +14,13 @@ export default function App() {
+   return (
+     <Routes>
+       <Route element={<Layout />}>
+-        <Route index element={<Index />} />
+-        <Route path="transactions" element={<Transactions />} />
+-        <Route path="transactions/:id" element={<TransactionDetail />} />
+-        <Route path="tasks" element={<Tasks />} />
+-        <Route path="commissions" element={<Commissions />} />
++        <Route element={<DoorScaleGate />}>
++          <Route index element={<Index />} />
++          <Route path="transactions" element={<Transactions />} />
++          <Route path="transactions/:id" element={<TransactionDetail />} />
++          <Route path="tasks" element={<Tasks />} />
++          <Route path="commissions" element={<Commissions />} />
++        </Route>
+         <Route path="choose-account" element={<ChooseAccount />} />
+         <Route path="private-integration" element={<PrivateIntegration />} />
+         <Route path="*" element={<Navigate to="/" replace />} />
+diff --git a/src/components/AccountSelector.tsx b/src/components/AccountSelector.tsx
+deleted file mode 100644
+index 5210ec3..0000000
+--- a/src/components/AccountSelector.tsx
++++ /dev/null
+@@ -1,81 +0,0 @@
+-import { useEffect, useState } from "react";
+-import {
+-  getStoredActiveLocationId,
+-  setStoredActiveLocationId,
+-} from "@/lib/active-location";
+-
+-type DoorScaleLocation = {
+-  id: string;
+-  name: string;
+-};
+-
+-type StatusResponse = {
+-  connected?: boolean;
+-  locations?: DoorScaleLocation[];
+-};
+-
+-export function AccountSelector() {
+-  const [locations, setLocations] = useState<DoorScaleLocation[]>([]);
+-  const [activeLocationId, setActiveLocationId] = useState("");
+-
+-  useEffect(() => {
+-    let isMounted = true;
+-
+-    async function loadLocations() {
+-      try {
+-        const response = await fetch("/api/ghl/status");
+-        const result = (await response.json()) as StatusResponse;
+-        const connectedLocations = result.locations ?? [];
+-        const storedLocationId = getStoredActiveLocationId();
+-        const nextActiveLocationId =
+-          connectedLocations.find((location) => location.id === storedLocationId)
+-            ?.id ??
+-          connectedLocations[0]?.id ??
+-          "";
+-
+-        if (!isMounted) return;
+-
+-        setLocations(connectedLocations);
+-        setActiveLocationId(nextActiveLocationId);
+-
+-        if (nextActiveLocationId && nextActiveLocationId !== storedLocationId) {
+-          setStoredActiveLocationId(nextActiveLocationId);
+-        }
+-      } catch {
+-        if (isMounted) {
+-          setLocations([]);
+-          setActiveLocationId("");
+-        }
+-      }
+-    }
+-
+-    void loadLocations();
+-
+-    return () => {
+-      isMounted = false;
+-    };
+-  }, []);
+-
+-  if (locations.length <= 1) return null;
+-
+-  return (
+-    <div className="account-selector">
+-      <label>
+-        <span>DoorScale Account</span>
+-        <select
+-          onChange={(event) => {
+-            setActiveLocationId(event.target.value);
+-            setStoredActiveLocationId(event.target.value);
+-          }}
+-          value={activeLocationId}
+-        >
+-          {locations.map((location) => (
+-            <option key={location.id} value={location.id}>
+-              {location.name}
+-            </option>
+-          ))}
+-        </select>
+-      </label>
+-    </div>
+-  );
+-}
+diff --git a/src/components/AppSidebar.tsx b/src/components/AppSidebar.tsx
+index 2283ccb..229cfc8 100644
+--- a/src/components/AppSidebar.tsx
++++ b/src/components/AppSidebar.tsx
+@@ -12,7 +12,7 @@ import { NavLink } from "@/components/NavLink";
+ import {
+   getDoorScaleLocationHeaders,
+   getStoredActiveLocationId,
+-  setStoredActiveLocationId,
++  withActiveLocationPath,
+ } from "@/lib/active-location";
+ 
+ export function AppSidebar() {
+@@ -26,17 +26,15 @@ export function AppSidebar() {
+ 
+     async function checkStatus() {
+       try {
+-        const response = await fetch("/api/ghl/status");
++        const response = await fetch("/api/ghl/status", {
++          headers: getDoorScaleLocationHeaders(),
++        });
+         const status = (await response.json()) as {
+           connected?: boolean;
+-          locations?: Array<{ id: string; name: string }>;
+         };
+ 
+         if (isMounted) {
+           setIsConnected(Boolean(status.connected));
+-          if (!getStoredActiveLocationId() && status.locations?.[0]?.id) {
+-            setStoredActiveLocationId(status.locations[0].id);
+-          }
+         }
+       } catch {
+         if (isMounted) {
+@@ -60,7 +58,7 @@ export function AppSidebar() {
+     setSyncMessage("");
+ 
+     if (!isConnected) {
+-      window.location.href = "/private-integration";
++      window.location.href = withActiveLocationPath("/private-integration");
+       return;
+     }
+ 
+diff --git a/src/components/Layout.tsx b/src/components/Layout.tsx
+index 48acb4e..434d334 100644
+--- a/src/components/Layout.tsx
++++ b/src/components/Layout.tsx
+@@ -1,5 +1,4 @@
+ import { Outlet } from "react-router-dom";
+-import { AccountSelector } from "@/components/AccountSelector";
+ import { AppSidebar } from "@/components/AppSidebar";
+ 
+ export function Layout() {
+@@ -7,7 +6,6 @@ export function Layout() {
+     <div className="app-shell">
+       <AppSidebar />
+       <main className="app-main">
+-        <AccountSelector />
+         <Outlet />
+       </main>
+     </div>
+diff --git a/src/components/NavLink.tsx b/src/components/NavLink.tsx
+index b6974b0..9c656c7 100644
+--- a/src/components/NavLink.tsx
++++ b/src/components/NavLink.tsx
+@@ -1,5 +1,6 @@
+ import { type ReactNode } from "react";
+ import { NavLink as RouterNavLink } from "react-router-dom";
++import { withActiveLocationPath } from "@/lib/active-location";
+ import { cn } from "@/lib/utils";
+ 
+ type NavLinkProps = {
+@@ -15,7 +16,7 @@ export function NavLink({ to, icon, children }: NavLinkProps) {
+         cn("sidebar__link", isActive && "sidebar__link--active")
+       }
+       end={to === "/"}
+-      to={to}
++      to={withActiveLocationPath(to)}
+     >
+       <span className="sidebar__link-icon">{icon}</span>
+       <span>{children}</span>
+diff --git a/src/hooks/use-crm-data.ts b/src/hooks/use-crm-data.ts
+index 94e070a..c8d3487 100644
+--- a/src/hooks/use-crm-data.ts
++++ b/src/hooks/use-crm-data.ts
+@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+ import {
+   getDoorScaleLocationHeaders,
+   getStoredActiveLocationId,
++  getUrlActiveLocationId,
+   setStoredActiveLocationId,
+   subscribeToActiveLocationChange,
+ } from "@/lib/active-location";
+@@ -612,26 +613,19 @@ function mapDemoData(): CrmDataState {
+   };
+ }
+ 
+-type DoorScaleStatusResponse = {
+-  activeLocationId?: string;
+-  connected?: boolean;
+-  locations?: Array<{ id: string; name: string }>;
+-};
+-
+ async function getActiveLocationId() {
+-  const storedLocationId = getStoredActiveLocationId();
++  const urlLocationId = getUrlActiveLocationId();
+ 
+-  if (storedLocationId) return storedLocationId;
++  if (urlLocationId) {
++    setStoredActiveLocationId(urlLocationId);
++    return urlLocationId;
++  }
+ 
+-  const response = await fetch("/api/ghl/status");
+-  const status = (await response.json().catch(() => ({}))) as DoorScaleStatusResponse;
+-  const locationId = status.locations?.[0]?.id ?? status.activeLocationId ?? "";
++  const storedLocationId = getStoredActiveLocationId();
+ 
+-  if (locationId) {
+-    setStoredActiveLocationId(locationId);
+-  }
++  if (storedLocationId) return storedLocationId;
+ 
+-  return locationId;
++  return "";
+ }
+ 
+ async function fetchCrmData(
+diff --git a/src/lib/active-location.ts b/src/lib/active-location.ts
+index f065880..5fb9f3a 100644
+--- a/src/lib/active-location.ts
++++ b/src/lib/active-location.ts
+@@ -2,7 +2,15 @@ const ACTIVE_LOCATION_KEY = "active_location_id";
+ const LEGACY_ACTIVE_LOCATION_KEY = "doorscale.activeLocationId";
+ const ACTIVE_LOCATION_EVENT = "doorscale-active-location-change";
+ 
++export function getUrlActiveLocationId() {
++  return new URLSearchParams(window.location.search).get("location_id")?.trim() || "";
++}
++
+ export function getStoredActiveLocationId() {
++  const urlLocationId = getUrlActiveLocationId();
++
++  if (urlLocationId) return urlLocationId;
++
+   return (
+     window.localStorage.getItem(ACTIVE_LOCATION_KEY) ||
+     window.localStorage.getItem(LEGACY_ACTIVE_LOCATION_KEY) ||
+@@ -11,6 +19,8 @@ export function getStoredActiveLocationId() {
+ }
+ 
+ export function setStoredActiveLocationId(locationId: string) {
++  if (!locationId) return;
++
+   window.localStorage.setItem(ACTIVE_LOCATION_KEY, locationId);
+   window.localStorage.setItem(LEGACY_ACTIVE_LOCATION_KEY, locationId);
+   window.dispatchEvent(new Event(ACTIVE_LOCATION_EVENT));
+@@ -22,6 +32,18 @@ export function getDoorScaleLocationHeaders(
+   return locationId ? { "x-doorscale-location-id": locationId } : {};
+ }
+ 
++export function withActiveLocationPath(path: string) {
++  const locationId = getStoredActiveLocationId();
++
++  if (!locationId) return path;
++
++  const [pathname, search = ""] = path.split("?");
++  const params = new URLSearchParams(search);
++  params.set("location_id", locationId);
++
++  return `${pathname}?${params.toString()}`;
++}
++
+ export function subscribeToActiveLocationChange(callback: () => void) {
+   window.addEventListener(ACTIVE_LOCATION_EVENT, callback);
+   window.addEventListener("storage", callback);
+diff --git a/src/pages/PrivateIntegration.tsx b/src/pages/PrivateIntegration.tsx
+index 61e8bcc..c5c3d6d 100644
+--- a/src/pages/PrivateIntegration.tsx
++++ b/src/pages/PrivateIntegration.tsx
+@@ -1,5 +1,5 @@
+ import { KeyRound, Save } from "lucide-react";
+-import { useState, type FormEvent } from "react";
++import { useEffect, useState, type FormEvent } from "react";
+ import { Button } from "@/components/ui/button";
+ import {
+   Card,
+@@ -8,19 +8,34 @@ import {
+   CardHeader,
+   CardTitle,
+ } from "@/components/ui/card";
++import {
++  getDoorScaleLocationHeaders,
++  getUrlActiveLocationId,
++  setStoredActiveLocationId,
++  withActiveLocationPath,
++} from "@/lib/active-location";
+ 
+ const initialForm = {
+   accountName: "",
+-  locationId: "",
+   privateIntegrationToken: "",
+ };
+ 
+ export default function PrivateIntegration() {
+   const [form, setForm] = useState(initialForm);
++  const [locationId, setLocationId] = useState("");
+   const [isSaving, setIsSaving] = useState(false);
+   const [message, setMessage] = useState("");
+   const [error, setError] = useState("");
+ 
++  useEffect(() => {
++    const activeLocationId = getUrlActiveLocationId();
++    setLocationId(activeLocationId);
++
++    if (activeLocationId) {
++      setStoredActiveLocationId(activeLocationId);
++    }
++  }, []);
++
+   function updateField(field: keyof typeof initialForm, value: string) {
+     setForm((current) => ({ ...current, [field]: value }));
+   }
+@@ -32,7 +47,7 @@ export default function PrivateIntegration() {
+ 
+     if (
+       !form.accountName.trim() ||
+-      !form.locationId.trim() ||
++      !locationId ||
+       !form.privateIntegrationToken.trim()
+     ) {
+       setError("Complete all DoorScale connection fields.");
+@@ -46,8 +61,13 @@ export default function PrivateIntegration() {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+-        body: JSON.stringify(form),
++        body: JSON.stringify({
++          ...form,
++          active_location_id: locationId,
++          location_id: locationId,
++        }),
+       });
+       const result = (await response.json().catch(() => ({}))) as {
+         message?: string;
+@@ -57,10 +77,11 @@ export default function PrivateIntegration() {
+         throw new Error(result.message || "Unable to save DoorScale connection.");
+       }
+ 
++      setStoredActiveLocationId(locationId);
+       setForm(initialForm);
+       setMessage(result.message || "DoorScale connected successfully.");
+       window.setTimeout(() => {
+-        window.location.href = "/";
++        window.location.href = withActiveLocationPath("/");
+       }, 900);
+     } catch (saveError) {
+       setError(
+@@ -98,6 +119,11 @@ export default function PrivateIntegration() {
+         </CardHeader>
+         <CardContent>
+           <form className="private-integration-form" onSubmit={handleSubmit}>
++            {!locationId ? (
++              <p className="dashboard__error">
++                Open this dashboard from your DoorScale account.
++              </p>
++            ) : null}
+             <label>
+               <span>Account Name</span>
+               <input
+@@ -107,15 +133,6 @@ export default function PrivateIntegration() {
+                 value={form.accountName}
+               />
+             </label>
+-            <label>
+-              <span>Location ID</span>
+-              <input
+-                onChange={(event) =>
+-                  updateField("locationId", event.target.value)
+-                }
+-                value={form.locationId}
+-              />
+-            </label>
+             <label>
+               <span>Private Integration Token</span>
+               <input
+diff --git a/src/pages/Transactions.tsx b/src/pages/Transactions.tsx
+index a57168b..9f68739 100644
+--- a/src/pages/Transactions.tsx
++++ b/src/pages/Transactions.tsx
+@@ -16,6 +16,7 @@ import {
+   type TransactionStage,
+   useCRMData,
+ } from "@/hooks/use-crm-data";
++import { withActiveLocationPath } from "@/lib/active-location";
+ import { formatCurrency } from "@/lib/utils";
+ 
+ function formatDate(dateValue: string) {
+@@ -117,7 +118,7 @@ export default function Transactions() {
+             aria-label={`Open transaction ${transaction.propertyAddress}`}
+             className="transaction-card-link"
+             key={transaction.id}
+-            to={`/transactions/${transaction.id}`}
++            to={withActiveLocationPath(`/transactions/${transaction.id}`)}
+           >
+             <Card>
+               <CardHeader>

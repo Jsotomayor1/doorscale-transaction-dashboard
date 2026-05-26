@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   getDoorScaleLocationHeaders,
   getStoredActiveLocationId,
+  getUrlActiveLocationId,
   setStoredActiveLocationId,
   subscribeToActiveLocationChange,
 } from "@/lib/active-location";
@@ -612,26 +613,19 @@ function mapDemoData(): CrmDataState {
   };
 }
 
-type DoorScaleStatusResponse = {
-  activeLocationId?: string;
-  connected?: boolean;
-  locations?: Array<{ id: string; name: string }>;
-};
-
 async function getActiveLocationId() {
+  const urlLocationId = getUrlActiveLocationId();
+
+  if (urlLocationId) {
+    setStoredActiveLocationId(urlLocationId);
+    return urlLocationId;
+  }
+
   const storedLocationId = getStoredActiveLocationId();
 
   if (storedLocationId) return storedLocationId;
 
-  const response = await fetch("/api/ghl/status");
-  const status = (await response.json().catch(() => ({}))) as DoorScaleStatusResponse;
-  const locationId = status.locations?.[0]?.id ?? status.activeLocationId ?? "";
-
-  if (locationId) {
-    setStoredActiveLocationId(locationId);
-  }
-
-  return locationId;
+  return "";
 }
 
 async function fetchCrmData(

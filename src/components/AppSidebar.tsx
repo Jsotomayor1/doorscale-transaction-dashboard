@@ -12,7 +12,7 @@ import { NavLink } from "@/components/NavLink";
 import {
   getDoorScaleLocationHeaders,
   getStoredActiveLocationId,
-  setStoredActiveLocationId,
+  withActiveLocationPath,
 } from "@/lib/active-location";
 
 export function AppSidebar() {
@@ -26,17 +26,15 @@ export function AppSidebar() {
 
     async function checkStatus() {
       try {
-        const response = await fetch("/api/ghl/status");
+        const response = await fetch("/api/ghl/status", {
+          headers: getDoorScaleLocationHeaders(),
+        });
         const status = (await response.json()) as {
           connected?: boolean;
-          locations?: Array<{ id: string; name: string }>;
         };
 
         if (isMounted) {
           setIsConnected(Boolean(status.connected));
-          if (!getStoredActiveLocationId() && status.locations?.[0]?.id) {
-            setStoredActiveLocationId(status.locations[0].id);
-          }
         }
       } catch {
         if (isMounted) {
@@ -60,7 +58,7 @@ export function AppSidebar() {
     setSyncMessage("");
 
     if (!isConnected) {
-      window.location.href = "/private-integration";
+      window.location.href = withActiveLocationPath("/private-integration");
       return;
     }
 

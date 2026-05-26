@@ -4,7 +4,7 @@ import {
   getActiveLocation,
   getRequestedLocationId,
   logRouteDataCounts,
-} from "../_active-location";
+} from "../_active-location.js";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities";
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";

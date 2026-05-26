@@ -1,5 +1,5 @@
 import { KeyRound, Save } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,18 +8,33 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  getDoorScaleLocationHeaders,
+  getUrlActiveLocationId,
+  setStoredActiveLocationId,
+  withActiveLocationPath,
+} from "@/lib/active-location";
 
 const initialForm = {
   accountName: "",
-  locationId: "",
   privateIntegrationToken: "",
 };
 
 export default function PrivateIntegration() {
   const [form, setForm] = useState(initialForm);
+  const [locationId, setLocationId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const activeLocationId = getUrlActiveLocationId();
+    setLocationId(activeLocationId);
+
+    if (activeLocationId) {
+      setStoredActiveLocationId(activeLocationId);
+    }
+  }, []);
 
   function updateField(field: keyof typeof initialForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -32,7 +47,7 @@ export default function PrivateIntegration() {
 
     if (
       !form.accountName.trim() ||
-      !form.locationId.trim() ||
+      !locationId ||
       !form.privateIntegrationToken.trim()
     ) {
       setError("Complete all DoorScale connection fields.");
@@ -46,8 +61,13 @@ export default function PrivateIntegration() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          active_location_id: locationId,
+          location_id: locationId,
+        }),
       });
       const result = (await response.json().catch(() => ({}))) as {
         message?: string;
@@ -57,10 +77,11 @@ export default function PrivateIntegration() {
         throw new Error(result.message || "Unable to save DoorScale connection.");
       }
 
+      setStoredActiveLocationId(locationId);
       setForm(initialForm);
       setMessage(result.message || "DoorScale connected successfully.");
       window.setTimeout(() => {
-        window.location.href = "/";
+        window.location.href = withActiveLocationPath("/");
       }, 900);
     } catch (saveError) {
       setError(
@@ -98,6 +119,11 @@ export default function PrivateIntegration() {
         </CardHeader>
         <CardContent>
           <form className="private-integration-form" onSubmit={handleSubmit}>
+            {!locationId ? (
+              <p className="dashboard__error">
+                Open this dashboard from your DoorScale account.
+              </p>
+            ) : null}
             <label>
               <span>Account Name</span>
               <input
@@ -105,15 +131,6 @@ export default function PrivateIntegration() {
                   updateField("accountName", event.target.value)
                 }
                 value={form.accountName}
-              />
-            </label>
-            <label>
-              <span>Location ID</span>
-              <input
-                onChange={(event) =>
-                  updateField("locationId", event.target.value)
-                }
-                value={form.locationId}
               />
             </label>
             <label>
