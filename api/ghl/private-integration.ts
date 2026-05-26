@@ -1,0 +1,77 @@
+import { createClient } from "@supabase/supabase-js";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+
+type PrivateIntegrationBody = {
+  accountName?: string;
+  locationId?: string;
+  privateIntegrationToken?: string;
+};
+
+export default async function handler(
+  request: VercelRequest,
+  response: VercelResponse,
+) {
+  if (request.method !== "POST") {
+    response.status(405).json({ message: "Unable to save DoorScale connection." });
+    return;
+  }
+
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    response.status(500).json({ message: "Unable to save DoorScale connection." });
+    return;
+  }
+
+  const body = request.body as PrivateIntegrationBody;
+  const accountName = body.accountName?.trim();
+  const locationId = body.locationId?.trim();
+  const privateIntegrationToken = body.privateIntegrationToken?.trim();
+
+  if (!accountName || !locationId || !privateIntegrationToken) {
+    response.status(400).json({ message: "Complete all DoorScale connection fields." });
+    return;
+  }
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("ghl_locations")
+    .upsert(
+      {
+        access_token: privateIntegrationToken,
+        available_locations: [],
+        company_id: null,
+        connection_status: "connected",
+        expires_at: new Date("2099-12-31T23:59:59.000Z").toISOString(),
+        is_bulk_installation: false,
+        location_access_token: null,
+        location_id: locationId,
+        location_name: accountName,
+        location_refresh_token: null,
+        location_token_expires_at: null,
+        parent_connection_id: null,
+        refresh_token: null,
+        selected_at: now,
+        selected_location_id: locationId,
+        selected_location_name: accountName,
+        updated_at: now,
+        user_type: "PrivateIntegration",
+      },
+      { onConflict: "location_id" },
+    );
+
+  if (error) {
+    console.error("DoorScale private integration save failed:", error);
+    response.status(500).json({ message: "Unable to save DoorScale connection." });
+    return;
+  }
+
+  response.status(200).json({
+    connected: true,
+    message: "DoorScale connection saved.",
+  });
+}

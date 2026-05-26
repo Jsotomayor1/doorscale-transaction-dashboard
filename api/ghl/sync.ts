@@ -308,6 +308,8 @@ function hasUsableLocationToken(connection: StoredConnection) {
 }
 
 function isCompanyInstall(connection: StoredConnection) {
+  if (connection.user_type === "PrivateIntegration") return false;
+
   return (
     connection.is_bulk_installation === true ||
     connection.user_type?.toLowerCase() === "company" ||

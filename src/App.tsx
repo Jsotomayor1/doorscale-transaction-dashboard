@@ -3,6 +3,7 @@ import { Layout } from "@/components/Layout";
 import ChooseAccount from "@/pages/ChooseAccount";
 import Commissions from "@/pages/Commissions";
 import Index from "@/pages/Index";
+import PrivateIntegration from "@/pages/PrivateIntegration";
 import Tasks from "@/pages/Tasks";
 import TransactionDetail from "@/pages/TransactionDetail";
 import Transactions from "@/pages/Transactions";
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="tasks" element={<Tasks />} />
         <Route path="commissions" element={<Commissions />} />
         <Route path="choose-account" element={<ChooseAccount />} />
+        <Route path="private-integration" element={<PrivateIntegration />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

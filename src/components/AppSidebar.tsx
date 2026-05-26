@@ -139,6 +139,19 @@ export function AppSidebar() {
           {isConnected ? <RefreshCw size={16} /> : <LinkIcon size={16} />}
           {connectionLabel}
         </button>
+        {!isConnected && !needsAccountChoice ? (
+          <button
+            className="sidebar__connect sidebar__connect--secondary"
+            disabled={isCheckingStatus}
+            onClick={() => {
+              window.location.href = "/private-integration";
+            }}
+            type="button"
+          >
+            <LinkIcon size={16} />
+            Private Integration
+          </button>
+        ) : null}
         {syncMessage ? (
           <p className="sidebar__sync-message">{syncMessage}</p>
         ) : null}

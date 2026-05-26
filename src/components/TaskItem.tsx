@@ -8,12 +8,12 @@ import { type DashboardTask } from "@/hooks/use-crm-data";
 type TaskItemProps = {
   task: DashboardTask;
   onComplete: (taskId: string) => Promise<void>;
-  onRetrySync?: (taskId: string) => Promise<string | void>;
-onUpdateDueDateTime: (input: {
-  taskId: string;
-  dueDate: string;
-  dueTime: string;
-}) => Promise<void>;
+  onRetrySync?: (taskId: string) => Promise<string>;
+  onUpdateDueDateTime: (input: {
+    taskId: string;
+    dueDate: string;
+    dueTime: string;
+  }) => Promise<void>;
   showContext?: boolean;
 };
 
@@ -67,16 +67,10 @@ function isOverdue(task: DashboardTask) {
   );
 }
 
-function getSyncLabel(syncStatus = "synced") {
-  if (syncStatus === "pending_sync") return "Pending Sync";
-  if (syncStatus === "sync_error") return "Sync Error";
-  return "Synced";
-}
-
-function getSyncVariant(syncStatus = "synced") {
-  if (syncStatus === "pending_sync") return "warning";
-  if (syncStatus === "sync_error") return "danger";
-  return "success";
+function needsSync(task: DashboardTask) {
+  return ["pending_sync", "sync_error"].includes(
+    (task.syncStatus || "synced").toLowerCase(),
+  );
 }
 
 export function TaskItem({
@@ -115,11 +109,11 @@ export function TaskItem({
     setIsSaving(true);
 
     try {
-await onUpdateDueDateTime({
-  taskId: task.id,
-  dueDate,
-  dueTime,
-});
+      await onUpdateDueDateTime({
+        taskId: task.id,
+        dueDate,
+        dueTime,
+      });
       setIsEditingDueDate(false);
     } catch (error) {
       setTaskError(
@@ -137,10 +131,7 @@ await onUpdateDueDateTime({
     setIsSaving(true);
 
     try {
-      const message = await onRetrySync(task.id);
-      if (message) {
-        setTaskError(message);
-      }
+      await onRetrySync(task.id);
     } catch (error) {
       setTaskError(
         error instanceof Error ? error.message : "Unable to retry sync.",
@@ -149,10 +140,6 @@ await onUpdateDueDateTime({
       setIsSaving(false);
     }
   }
-
-  const needsSync = ["pending_sync", "sync_error"].includes(
-    (task.syncStatus || "synced").toLowerCase(),
-  );
 
   return (
     <article
@@ -171,9 +158,6 @@ await onUpdateDueDateTime({
       <div className="task-row__badges">
         {overdue ? <Badge variant="danger">Overdue</Badge> : null}
         <Badge variant={taskVariant(task)}>{completed ? "completed" : task.status}</Badge>
-        <Badge variant={getSyncVariant(task.syncStatus)}>
-          {getSyncLabel(task.syncStatus)}
-        </Badge>
       </div>
       <span className="task-row__due">
         <CalendarClock size={15} />
@@ -203,11 +187,11 @@ await onUpdateDueDateTime({
           <Pencil size={15} />
           Edit Due Date/Time
         </Button>
-        {needsSync ? (
+        {needsSync(task) && onRetrySync ? (
           <Button
             disabled={isSaving}
             onClick={() => void handleRetrySync()}
-            variant="secondary"
+            variant="ghost"
           >
             Retry Sync
           </Button>
