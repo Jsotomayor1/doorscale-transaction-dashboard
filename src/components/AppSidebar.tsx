@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink } from "@/components/NavLink";
+import {
+  getStoredActiveLocationId,
+  setStoredActiveLocationId,
+} from "@/lib/active-location";
 
 export function AppSidebar() {
   const [isConnected, setIsConnected] = useState(false);
@@ -24,10 +28,14 @@ export function AppSidebar() {
         const response = await fetch("/api/ghl/status");
         const status = (await response.json()) as {
           connected?: boolean;
+          locations?: Array<{ id: string; name: string }>;
         };
 
         if (isMounted) {
           setIsConnected(Boolean(status.connected));
+          if (!getStoredActiveLocationId() && status.locations?.[0]?.id) {
+            setStoredActiveLocationId(status.locations[0].id);
+          }
         }
       } catch {
         if (isMounted) {
@@ -60,6 +68,12 @@ export function AppSidebar() {
     try {
       const response = await fetch("/api/ghl/sync", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          locationId: getStoredActiveLocationId(),
+        }),
       });
       const result = (await response.json().catch(() => ({}))) as {
         message?: string;

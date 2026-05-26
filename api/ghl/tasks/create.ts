@@ -19,6 +19,7 @@ type CreateTaskBody = {
   assignedTo?: string;
   dueDate?: string;
   dueDateTime?: string;
+  locationId?: string;
   status?: string;
   title?: string;
   taskId?: string;
@@ -44,12 +45,14 @@ function getDueDateTime(body: CreateTaskBody) {
 
 async function getConnectedAccount(
   supabase: ReturnType<typeof createClient>,
+  locationId: string,
 ) {
   const { data, error } = await supabase
     .from("ghl_locations")
     .select("access_token, location_id")
     .or("connection_status.eq.connected,connection_status.is.null")
     .not("location_id", "like", "company:%")
+    .eq("location_id", locationId)
     .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -84,7 +87,7 @@ export default async function handler(
 
   const body = request.body as CreateTaskBody;
 
-  if (!body.title || !body.transactionId) {
+  if (!body.title || !body.transactionId || !body.locationId) {
     response.status(400).json({ ok: false, message: "Task details are missing." });
     return;
   }
@@ -97,6 +100,7 @@ export default async function handler(
     .from("transactions")
     .select("location_id, contact_id, ghl_opportunity_id")
     .eq("id", body.transactionId)
+    .eq("location_id", body.locationId)
     .maybeSingle();
 
   if (transactionError || !transaction) {
@@ -122,10 +126,14 @@ export default async function handler(
   let writeBackFailed = false;
 
   try {
-    const connectedAccount = await getConnectedAccount(supabase);
+    const connectedAccount = await getConnectedAccount(supabase, body.locationId);
 
     if (!connectedAccount?.access_token) {
       throw new Error("DoorScale account is not connected.");
+    }
+
+    if (connectedAccount.location_id !== transactionRow.location_id) {
+      throw new Error("DoorScale account does not match this transaction.");
     }
 
     const taskPayload = {
@@ -175,7 +183,13 @@ export default async function handler(
     last_synced_at: writeBackFailed ? null : new Date().toISOString(),
   };
   const saveQuery = body.taskId
-    ? supabase.from("tasks").update(taskRow).eq("id", body.taskId).select("id").single()
+    ? supabase
+        .from("tasks")
+        .update(taskRow)
+        .eq("id", body.taskId)
+        .eq("location_id", body.locationId)
+        .select("id")
+        .single()
     : supabase.from("tasks").insert(taskRow).select("id").single();
   const { data: savedTask, error: saveError } = await saveQuery;
 

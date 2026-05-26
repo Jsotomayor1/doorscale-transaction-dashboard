@@ -30,6 +30,10 @@ type StoredConnection = {
   user_type?: string | null;
 };
 
+type SyncRequestBody = {
+  locationId?: string;
+};
+
 type LocationTokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -194,6 +198,7 @@ type DoorScaleTask = {
 };
 
 type ExistingTransaction = {
+  id?: string;
   ghl_opportunity_id: string;
   buyer_name: string | null;
   closing_date: string | null;
@@ -244,6 +249,11 @@ type SyncedTransaction = {
   id: string;
   stage?: string | null;
   transaction_type?: string | null;
+};
+
+type ExistingTask = {
+  ghl_task_id: string;
+  id: string;
 };
 
 type TaskUpsertPayload = {
@@ -1167,8 +1177,103 @@ async function generateDocumentChecklist(
   }
 }
 
+async function saveSyncedTransactions(
+  supabase: ReturnType<typeof createClient>,
+  payload: TransactionUpsertPayload[],
+  locationId: string,
+) {
+  const syncedRows: SyncedTransaction[] = [];
+
+  for (const transaction of payload) {
+    const { data: updatedRow, error: updateError } = await supabase
+      .from("transactions")
+      .update(transaction)
+      .eq("location_id", locationId)
+      .eq("ghl_opportunity_id", transaction.ghl_opportunity_id)
+      .select("id, ghl_opportunity_id, contact_id, transaction_type, stage")
+      .maybeSingle();
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    if (updatedRow) {
+      syncedRows.push(updatedRow as SyncedTransaction);
+      continue;
+    }
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from("transactions")
+      .insert(transaction)
+      .select("id, ghl_opportunity_id, contact_id, transaction_type, stage")
+      .single();
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    syncedRows.push(insertedRow as SyncedTransaction);
+  }
+
+  return syncedRows;
+}
+
+async function saveSyncedTasks(
+  supabase: ReturnType<typeof createClient>,
+  payload: TaskUpsertPayload[],
+  locationId: string,
+) {
+  const taskIds = payload.map((task) => task.ghl_task_id);
+  const { data: existingTasks, error: existingTasksError } = await supabase
+    .from("tasks")
+    .select("id, ghl_task_id")
+    .eq("location_id", locationId)
+    .in("ghl_task_id", taskIds);
+
+  if (existingTasksError) {
+    throw existingTasksError;
+  }
+
+  const existingByTaskId = new Map(
+    ((existingTasks ?? []) as ExistingTask[]).map((task) => [
+      task.ghl_task_id,
+      task.id,
+    ]),
+  );
+  let syncedTasks = 0;
+
+  for (const task of payload) {
+    const existingTaskId = existingByTaskId.get(task.ghl_task_id);
+
+    if (existingTaskId) {
+      const { error: updateError } = await supabase
+        .from("tasks")
+        .update(task)
+        .eq("id", existingTaskId)
+        .eq("location_id", locationId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      syncedTasks += 1;
+      continue;
+    }
+
+    const { error: insertError } = await supabase.from("tasks").insert(task);
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    syncedTasks += 1;
+  }
+
+  return syncedTasks;
+}
+
 export default async function handler(
-  _request: VercelRequest,
+  request: VercelRequest,
   response: VercelResponse,
 ) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -1188,13 +1293,22 @@ export default async function handler(
     },
   });
 
-  const { data: connections, error: connectionError } = await supabase
+  const body = (request.body ?? {}) as SyncRequestBody;
+  const activeLocationId =
+    typeof body.locationId === "string" ? body.locationId.trim() : "";
+  let connectionQuery = supabase
     .from("ghl_locations")
     .select(
       "access_token, company_id, created_at, connection_status, is_bulk_installation, location_access_token, location_refresh_token, location_token_expires_at, location_id, parent_connection_id, selected_at, selected_location_id, user_type",
     )
     .or("connection_status.eq.connected,connection_status.is.null")
-    .not("location_id", "like", "company:%")
+    .not("location_id", "like", "company:%");
+
+  if (activeLocationId) {
+    connectionQuery = connectionQuery.eq("location_id", activeLocationId);
+  }
+
+  const { data: connections, error: connectionError } = await connectionQuery
     .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1);
@@ -1217,6 +1331,11 @@ export default async function handler(
     });
     return;
   }
+
+  console.log("DoorScale sync active account:", {
+    activeLocationId: activeLocationId || null,
+    connectionLocationId: connection.location_id,
+  });
 
   let syncToken: string;
   let selectedLocationId: string;
@@ -1328,8 +1447,9 @@ export default async function handler(
     await supabase
       .from("transactions")
       .select(
-        "ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, ghl_contact_id, ghl_location_id, property_address, assigned_to, contact_name, contact_email, contact_phone, commission, status",
+        "id, ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, ghl_contact_id, ghl_location_id, property_address, assigned_to, contact_name, contact_email, contact_phone, commission, status",
       )
+      .eq("location_id", selectedLocationId)
       .in("ghl_opportunity_id", opportunityIds);
 
   if (existingTransactionsError) {
@@ -1369,12 +1489,15 @@ export default async function handler(
     );
 
   if (payload.length) {
-    const { data: syncedTransactions, error: syncError } = await supabase
-      .from("transactions")
-      .upsert(payload, { onConflict: "ghl_opportunity_id" })
-      .select("id, ghl_opportunity_id, contact_id, transaction_type, stage");
+    let syncedTransactionRows: SyncedTransaction[];
 
-    if (syncError) {
+    try {
+      syncedTransactionRows = await saveSyncedTransactions(
+        supabase,
+        payload,
+        selectedLocationId,
+      );
+    } catch (syncError) {
       console.error("DoorScale transaction sync upsert failed:", syncError);
       response.status(500).json({
         ok: false,
@@ -1383,7 +1506,6 @@ export default async function handler(
       return;
     }
 
-    const syncedTransactionRows = (syncedTransactions ?? []) as SyncedTransaction[];
     await Promise.all(
       syncedTransactionRows.map((transaction) =>
         generateDocumentChecklist(supabase, transaction, selectedLocationId),
@@ -1419,12 +1541,13 @@ export default async function handler(
     let syncedTasks = 0;
 
     if (taskPayload.length) {
-      const { data: syncedTaskRows, error: taskSyncError } = await supabase
-        .from("tasks")
-        .upsert(taskPayload, { onConflict: "ghl_task_id" })
-        .select("id");
-
-      if (taskSyncError) {
+      try {
+        syncedTasks = await saveSyncedTasks(
+          supabase,
+          taskPayload,
+          selectedLocationId,
+        );
+      } catch (taskSyncError) {
         console.error("DoorScale task sync upsert failed:", taskSyncError);
         response.status(500).json({
           ok: false,
@@ -1432,14 +1555,12 @@ export default async function handler(
         });
         return;
       }
-
-      syncedTasks = syncedTaskRows?.length ?? 0;
     }
 
     response.status(200).json({
       ok: true,
       message: "DoorScale data synced successfully.",
-      syncedTransactions: syncedTransactions?.length ?? 0,
+      syncedTransactions: syncedTransactionRows.length,
       syncedTasks,
       skippedTasks,
       opportunityCount,

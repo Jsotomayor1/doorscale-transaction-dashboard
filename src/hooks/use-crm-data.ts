@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { addDays, subDays } from "date-fns";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-const LOCATION_ID = "demo-location";
+import {
+  getStoredActiveLocationId,
+  setStoredActiveLocationId,
+  subscribeToActiveLocationChange,
+} from "@/lib/active-location";
 
 export const TRANSACTION_STAGES = [
   "Pre-listing",
@@ -606,25 +609,53 @@ function mapDemoData(): CrmDataState {
   };
 }
 
-async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
+type DoorScaleStatusResponse = {
+  activeLocationId?: string;
+  connected?: boolean;
+  locations?: Array<{ id: string; name: string }>;
+};
+
+async function getActiveLocationId() {
+  const storedLocationId = getStoredActiveLocationId();
+
+  if (storedLocationId) return storedLocationId;
+
+  const response = await fetch("/api/ghl/status");
+  const status = (await response.json().catch(() => ({}))) as DoorScaleStatusResponse;
+  const locationId = status.locations?.[0]?.id ?? status.activeLocationId ?? "";
+
+  if (locationId) {
+    setStoredActiveLocationId(locationId);
+  }
+
+  return locationId;
+}
+
+async function fetchCrmData(
+  client: SupabaseClient,
+  activeLocationId: string,
+): Promise<CrmDataState> {
   const [transactionsResult, tasksResult, documentsResult] = await Promise.all([
     client
       .from("transactions")
       .select(
         "id, location_id, property_address, transaction_type, stage, buyer_name, seller_name, assigned_to, contact_name, contact_email, contact_phone, closing_date, inspection_date, commission, status, sync_status, last_sync_error, last_synced_at, contact_id, ghl_contact_id, ghl_location_id, ghl_opportunity_id, created_at, updated_at",
       )
+      .eq("location_id", activeLocationId)
       .order("updated_at", { ascending: false }),
     client
       .from("tasks")
       .select(
         "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
       )
+      .eq("location_id", activeLocationId)
       .order("created_at", { ascending: false }),
     client
       .from("transaction_documents")
       .select(
         "id, transaction_id, document_type, document_name, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at",
       )
+      .eq("location_id", activeLocationId)
       .order("created_at", { ascending: false }),
   ]);
 
@@ -646,6 +677,7 @@ async function fetchCrmData(client: SupabaseClient): Promise<CrmDataState> {
 
 async function generateChecklistTasks(
   client: SupabaseClient,
+  activeLocationId: string,
   transactionId: string,
   transactionType: string,
   stage: TransactionStage,
@@ -653,7 +685,7 @@ async function generateChecklistTasks(
   const { data: templates, error: templateError } = await client
     .from("task_templates")
     .select("id, title, days_offset, assigned_role, sort_order")
-    .eq("location_id", LOCATION_ID)
+    .eq("location_id", activeLocationId)
     .eq("transaction_type", transactionType)
     .eq("stage", stage)
     .order("sort_order", { ascending: true });
@@ -669,7 +701,7 @@ async function generateChecklistTasks(
   const { data: existingTasks, error: existingTasksError } = await client
     .from("tasks")
     .select("title")
-    .eq("location_id", LOCATION_ID)
+    .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId);
 
   if (existingTasksError) {
@@ -695,7 +727,7 @@ async function generateChecklistTasks(
       );
 
       return {
-        location_id: LOCATION_ID,
+        location_id: activeLocationId,
         transaction_id: transactionId,
         title: template.title ?? "Untitled task",
         due_date: dueDateTime.toISOString().slice(0, 10),
@@ -716,6 +748,7 @@ async function generateChecklistTasks(
 
 async function generateDocumentChecklist(
   client: SupabaseClient,
+  activeLocationId: string,
   transactionId: string,
   transactionType: string,
   stage: string,
@@ -723,7 +756,7 @@ async function generateDocumentChecklist(
   const { data: templates, error: templateError } = await client
     .from("document_templates")
     .select("id, document_type, document_name, sort_order")
-    .eq("location_id", LOCATION_ID)
+    .eq("location_id", activeLocationId)
     .eq("transaction_type", transactionType)
     .eq("stage", stage)
     .order("sort_order", { ascending: true });
@@ -739,7 +772,7 @@ async function generateDocumentChecklist(
   const { data: existingDocuments, error: existingDocumentsError } = await client
     .from("transaction_documents")
     .select("document_type")
-    .eq("location_id", LOCATION_ID)
+    .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId);
 
   if (existingDocumentsError) {
@@ -758,7 +791,7 @@ async function generateDocumentChecklist(
       return documentType ? !existingTypes.has(documentType) : false;
     })
     .map((template) => ({
-      location_id: LOCATION_ID,
+      location_id: activeLocationId,
       transaction_id: transactionId,
       document_type: template.document_type,
       document_name: template.document_name || template.document_type,
@@ -821,6 +854,7 @@ export function useCrmData() {
   );
   const [loading, setLoading] = useState(!isDemoMode());
   const [error, setError] = useState<string | null>(null);
+  const [activeLocationId, setActiveLocationId] = useState("");
 
   const refreshData = useCallback(async () => {
     if (isDemoMode()) {
@@ -842,7 +876,16 @@ export function useCrmData() {
     setError(null);
 
     try {
-      setData(await fetchCrmData(client));
+      const locationId = await getActiveLocationId();
+
+      if (!locationId) {
+        setData(emptyData);
+        setError("Connect DoorScale to load transaction data.");
+        return;
+      }
+
+      setActiveLocationId(locationId);
+      setData(await fetchCrmData(client, locationId));
     } catch (crmError) {
       console.error("DoorScale transaction data load failed:", crmError);
       setError("Unable to load transaction data.");
@@ -918,6 +961,11 @@ export function useCrmData() {
       if (!client) {
         throw new Error("DoorScale connection is not configured.");
       }
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save transaction data.");
+      }
 
       const response = await fetch("/api/ghl/transactions/create", {
         method: "POST",
@@ -926,6 +974,7 @@ export function useCrmData() {
         },
         body: JSON.stringify({
           ...input,
+          locationId,
           status: "active",
         }),
       });
@@ -937,12 +986,14 @@ export function useCrmData() {
 
       await generateChecklistTasks(
         client,
+        locationId,
         result.transactionId,
         input.transactionType,
         input.stage,
       );
       await generateDocumentChecklist(
         client,
+        locationId,
         result.transactionId,
         input.transactionType,
         input.stage,
@@ -954,7 +1005,7 @@ export function useCrmData() {
         ? result.message || "Stage saved locally. DoorScale sync will retry."
         : undefined;
     },
-    [refreshData],
+    [activeLocationId, refreshData],
   );
 
   const updateTransactionStage = useCallback(
@@ -982,6 +1033,11 @@ export function useCrmData() {
       if (!client) {
         throw new Error("DoorScale connection is not configured.");
       }
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save transaction data.");
+      }
 
       const response = await fetch("/api/ghl/transactions/update", {
         method: "POST",
@@ -989,6 +1045,7 @@ export function useCrmData() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          locationId,
           stage: input.stage,
           transactionId: input.transactionId,
         }),
@@ -997,12 +1054,14 @@ export function useCrmData() {
 
       await generateChecklistTasks(
         client,
+        locationId,
         input.transactionId,
         input.transactionType,
         input.stage,
       );
       await generateDocumentChecklist(
         client,
+        locationId,
         input.transactionId,
         input.transactionType,
         input.stage,
@@ -1014,7 +1073,7 @@ export function useCrmData() {
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
         : undefined;
     },
-    [refreshData],
+    [activeLocationId, refreshData],
   );
 
   const updateTransactionDetails = useCallback(
@@ -1081,13 +1140,18 @@ export function useCrmData() {
       if (!client) {
         throw new Error("DoorScale connection is not configured.");
       }
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save transaction data.");
+      }
 
       const response = await fetch("/api/ghl/transactions/update", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(input),
+        body: JSON.stringify({ ...input, locationId }),
       });
       const result = await parseTransactionWriteResponse(response);
 
@@ -1097,7 +1161,7 @@ export function useCrmData() {
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
         : undefined;
     },
-    [refreshData],
+    [activeLocationId, refreshData],
   );
 
   const createTask = useCallback(
@@ -1137,6 +1201,7 @@ export function useCrmData() {
           status: "pending",
           title: input.title,
           transactionId: input.transactionId,
+          locationId: activeLocationId || (await getActiveLocationId()),
         }),
       });
       const result = await parseTaskWriteResponse(response);
@@ -1149,7 +1214,7 @@ export function useCrmData() {
         );
       }
     },
-    [refreshData],
+    [activeLocationId, refreshData],
   );
 
   const markTaskCompleted = useCallback(
@@ -1170,6 +1235,7 @@ export function useCrmData() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          locationId: activeLocationId || (await getActiveLocationId()),
           status: "completed",
           taskId,
         }),
@@ -1184,7 +1250,7 @@ export function useCrmData() {
         );
       }
     },
-    [refreshData],
+    [activeLocationId, refreshData],
   );
 
   const updateTaskDueDateTime = useCallback(
@@ -1215,6 +1281,7 @@ export function useCrmData() {
         body: JSON.stringify({
           dueDate: dueDate || null,
           dueDateTime,
+          locationId: activeLocationId || (await getActiveLocationId()),
           taskId,
         }),
       });
@@ -1228,7 +1295,7 @@ export function useCrmData() {
         );
       }
     },
-    [refreshData],
+    [activeLocationId, refreshData],
   );
 
   const retryTransactionSync = useCallback(
@@ -1259,6 +1326,7 @@ export function useCrmData() {
           sellerName: fields.sellerName,
           stage: transaction.stage,
           status: transaction.status,
+          locationId: activeLocationId || (await getActiveLocationId()),
           transactionId,
           transactionType: fields.transactionType,
         }),
@@ -1271,7 +1339,7 @@ export function useCrmData() {
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
         : "Transaction synced.";
     },
-    [data.opportunities, refreshData],
+    [activeLocationId, data.opportunities, refreshData],
   );
 
   const retryTaskSync = useCallback(
@@ -1298,6 +1366,7 @@ export function useCrmData() {
           taskId,
           title: task.title,
           transactionId: task.transactionId,
+          locationId: activeLocationId || (await getActiveLocationId()),
         }),
       });
       const result = await parseTaskWriteResponse(response);
@@ -1308,7 +1377,7 @@ export function useCrmData() {
         ? result.message || "Task saved locally. DoorScale sync will retry later."
         : "Task synced.";
     },
-    [data.tasks, refreshData],
+    [activeLocationId, data.tasks, refreshData],
   );
 
   const updateDocumentStatus = useCallback(
@@ -1332,7 +1401,8 @@ export function useCrmData() {
       const { error: updateError } = await client
         .from("transaction_documents")
         .update({ status })
-        .eq("id", documentId);
+        .eq("id", documentId)
+        .eq("location_id", activeLocationId || (await getActiveLocationId()));
 
       if (updateError) {
         throw new Error("Unable to update document status.");
@@ -1340,12 +1410,20 @@ export function useCrmData() {
 
       await refreshData();
     },
-    [refreshData],
+    [activeLocationId, refreshData],
   );
 
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
+
+  useEffect(
+    () =>
+      subscribeToActiveLocationChange(() => {
+        void refreshData();
+      }),
+    [refreshData],
+  );
 
   return useMemo(() => {
     const activeTransactions = data.transactions.filter(

@@ -37,6 +37,7 @@ type CreateTransactionBody = {
   closingDate?: string;
   commission?: string;
   inspectionDate?: string;
+  locationId?: string;
   propertyAddress?: string;
   sellerName?: string;
   stage?: string;
@@ -90,12 +91,21 @@ function mapStatus(status?: string) {
   }
 }
 
-async function getConnectedAccount(supabase: ReturnType<typeof createClient>) {
-  const { data, error } = await supabase
+async function getConnectedAccount(
+  supabase: ReturnType<typeof createClient>,
+  locationId?: string,
+) {
+  let query = supabase
     .from("ghl_locations")
     .select("access_token, location_id")
     .or("connection_status.eq.connected,connection_status.is.null")
-    .not("location_id", "like", "company:%")
+    .not("location_id", "like", "company:%");
+
+  if (locationId) {
+    query = query.eq("location_id", locationId);
+  }
+
+  const { data, error } = await query
     .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -168,6 +178,11 @@ export default async function handler(
     return;
   }
 
+  if (!body.locationId) {
+    response.status(400).json({ ok: false, message: "DoorScale account is required." });
+    return;
+  }
+
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
   });
@@ -176,7 +191,7 @@ export default async function handler(
   let writeBackFailed = false;
 
   try {
-    const connectedAccount = await getConnectedAccount(supabase);
+    const connectedAccount = await getConnectedAccount(supabase, body.locationId);
 
     if (!connectedAccount?.access_token) {
       throw new Error("DoorScale account is not connected.");
@@ -234,7 +249,7 @@ export default async function handler(
     ghl_location_id: linkedLocationId,
     ghl_opportunity_id: opportunityId ?? null,
     inspection_date: body.inspectionDate || null,
-    location_id: linkedLocationId ?? "demo-location",
+    location_id: body.locationId,
     property_address: body.propertyAddress,
     seller_name: body.sellerName || null,
     stage: body.stage,
@@ -251,6 +266,7 @@ export default async function handler(
         .from("transactions")
         .update(transactionRow)
         .eq("id", body.transactionId)
+        .eq("location_id", body.locationId)
         .select("id")
         .single()
     : supabase.from("transactions").insert(transactionRow).select("id").single();

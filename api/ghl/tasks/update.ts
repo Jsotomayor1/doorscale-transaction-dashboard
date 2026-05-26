@@ -14,6 +14,7 @@ type TaskRow = {
   due_date: string | null;
   due_datetime: string | null;
   ghl_task_id: string | null;
+  location_id: string;
   status: string | null;
   title: string | null;
 };
@@ -22,6 +23,7 @@ type UpdateTaskBody = {
   assignedTo?: string;
   dueDate?: string | null;
   dueDateTime?: string | null;
+  locationId?: string;
   status?: string;
   taskId?: string;
   title?: string;
@@ -29,12 +31,14 @@ type UpdateTaskBody = {
 
 async function getConnectedAccount(
   supabase: ReturnType<typeof createClient>,
+  locationId: string,
 ) {
   const { data, error } = await supabase
     .from("ghl_locations")
     .select("access_token, location_id")
     .or("connection_status.eq.connected,connection_status.is.null")
     .not("location_id", "like", "company:%")
+    .eq("location_id", locationId)
     .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -101,7 +105,7 @@ export default async function handler(
 
   const body = request.body as UpdateTaskBody;
 
-  if (!body.taskId) {
+  if (!body.taskId || !body.locationId) {
     response.status(400).json({ ok: false, message: "Task details are missing." });
     return;
   }
@@ -112,8 +116,9 @@ export default async function handler(
 
   const { data: currentTask, error: taskError } = await supabase
     .from("tasks")
-    .select("assigned_to, due_date, due_datetime, ghl_task_id, status, title")
+    .select("assigned_to, due_date, due_datetime, ghl_task_id, location_id, status, title")
     .eq("id", body.taskId)
+    .eq("location_id", body.locationId)
     .maybeSingle();
 
   if (taskError || !currentTask) {
@@ -126,10 +131,14 @@ export default async function handler(
 
   if (task.ghl_task_id) {
     try {
-      const connectedAccount = await getConnectedAccount(supabase);
+      const connectedAccount = await getConnectedAccount(supabase, body.locationId);
 
       if (!connectedAccount?.access_token) {
         throw new Error("DoorScale account is not connected.");
+      }
+
+      if (connectedAccount.location_id !== task.location_id) {
+        throw new Error("DoorScale account does not match this task.");
       }
 
       const updateResponse = await fetch(
@@ -166,7 +175,8 @@ export default async function handler(
       ...buildLocalUpdate(body),
       ...getSyncFields(writeBackFailed),
     })
-    .eq("id", body.taskId);
+    .eq("id", body.taskId)
+    .eq("location_id", body.locationId);
 
   if (updateError) {
     console.error("Local task update failed:", updateError);

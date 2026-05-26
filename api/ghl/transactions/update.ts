@@ -42,6 +42,7 @@ type UpdateTransactionBody = {
   closingDate?: string;
   commission?: string;
   inspectionDate?: string;
+  locationId?: string;
   propertyAddress?: string;
   sellerName?: string;
   stage?: string;
@@ -85,12 +86,16 @@ function mapStatus(status?: string) {
   }
 }
 
-async function getConnectedAccount(supabase: ReturnType<typeof createClient>) {
+async function getConnectedAccount(
+  supabase: ReturnType<typeof createClient>,
+  locationId: string,
+) {
   const { data, error } = await supabase
     .from("ghl_locations")
     .select("access_token, location_id")
     .or("connection_status.eq.connected,connection_status.is.null")
     .not("location_id", "like", "company:%")
+    .eq("location_id", locationId)
     .order("selected_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -202,7 +207,7 @@ export default async function handler(
 
   const body = request.body as UpdateTransactionBody;
 
-  if (!body.transactionId) {
+  if (!body.transactionId || !body.locationId) {
     response.status(400).json({ ok: false, message: "Transaction details are missing." });
     return;
   }
@@ -214,6 +219,7 @@ export default async function handler(
     .from("transactions")
     .select("ghl_opportunity_id, location_id")
     .eq("id", body.transactionId)
+    .eq("location_id", body.locationId)
     .maybeSingle();
 
   if (transactionError || !transaction) {
@@ -233,10 +239,14 @@ export default async function handler(
     });
   } else {
     try {
-      const connectedAccount = await getConnectedAccount(supabase);
+      const connectedAccount = await getConnectedAccount(supabase, body.locationId);
 
       if (!connectedAccount?.access_token) {
         throw new Error("DoorScale account is not connected.");
+      }
+
+      if (connectedAccount.location_id !== transactionRow.location_id) {
+        throw new Error("DoorScale account does not match this transaction.");
       }
 
       let pipelineId: string | undefined;
@@ -312,7 +322,8 @@ export default async function handler(
       ...buildLocalUpdate(body),
       ...getSyncFields(body, writeBackFailed),
     })
-    .eq("id", body.transactionId);
+    .eq("id", body.transactionId)
+    .eq("location_id", body.locationId);
 
   if (updateError) {
     console.error("Local transaction update failed:", updateError);
