@@ -7,6 +7,8 @@ import {
 } from "../_active-location.js";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities";
+const CONTACTS_URL = "https://services.leadconnectorhq.com/contacts/";
+const CONTACTS_SEARCH_URL = "https://services.leadconnectorhq.com/contacts/search";
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
 const API_VERSION = "2021-07-28";
 const PIPELINE_NAME = "Transaction Management System";
@@ -33,12 +35,19 @@ type PipelinesResponse = {
 };
 
 type TransactionRow = {
+  contact_id: string | null;
+  ghl_contact_id: string | null;
   ghl_opportunity_id: string | null;
   location_id: string;
+  stage: string | null;
 };
 
 type UpdateTransactionBody = {
   buyerName?: string;
+  clientEmail?: string;
+  clientFirstName?: string;
+  clientLastName?: string;
+  clientPhone?: string;
   closingDate?: string;
   commission?: string;
   inspectionDate?: string;
@@ -49,6 +58,31 @@ type UpdateTransactionBody = {
   status?: string;
   transactionId?: string;
   transactionType?: string;
+};
+
+type Contact = {
+  _id?: string;
+  email?: string;
+  id?: string;
+  phone?: string;
+};
+
+type ContactSearchResponse = {
+  contacts?: Contact[];
+  data?: Contact[];
+};
+
+type ContactCreateResponse = {
+  contact?: Contact;
+  id?: string;
+};
+
+type OpportunityResponse = {
+  id?: string;
+  opportunity?: {
+    _id?: string;
+    id?: string;
+  };
 };
 
 function getPipelineId(pipeline: Pipeline) {
@@ -78,6 +112,20 @@ function getPipelines(payload: PipelinesResponse) {
   if (Array.isArray(payload.pipelines)) return payload.pipelines;
   if (Array.isArray(payload.data)) return payload.data;
   return [];
+}
+
+function getContacts(payload: ContactSearchResponse) {
+  if (Array.isArray(payload.contacts)) return payload.contacts;
+  if (Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
+function getContactId(payload: ContactCreateResponse | Contact) {
+  return payload.id ?? payload.contact?.id ?? payload.contact?._id ?? payload._id;
+}
+
+function getOpportunityId(payload: OpportunityResponse) {
+  return payload.id ?? payload.opportunity?.id ?? payload.opportunity?._id;
 }
 
 function mapStatus(status?: string) {
@@ -135,8 +183,18 @@ async function getPipelineConfig(accessToken: string, locationId: string) {
 }
 
 function buildLocalUpdate(body: UpdateTransactionBody) {
+  const clientName = [body.clientFirstName, body.clientLastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
   return {
     ...(body.buyerName !== undefined ? { buyer_name: body.buyerName || null } : {}),
+    ...(body.clientEmail !== undefined ? { client_email: body.clientEmail || null, contact_email: body.clientEmail || null } : {}),
+    ...(body.clientFirstName !== undefined ? { client_first_name: body.clientFirstName || null } : {}),
+    ...(body.clientLastName !== undefined ? { client_last_name: body.clientLastName || null } : {}),
+    ...(body.clientPhone !== undefined ? { client_phone: body.clientPhone || null, contact_phone: body.clientPhone || null } : {}),
+    ...(clientName ? { contact_name: clientName } : {}),
     ...(body.closingDate !== undefined ? { closing_date: body.closingDate || null } : {}),
     ...(body.commission !== undefined ? { commission: Number(body.commission || 0) } : {}),
     ...(body.inspectionDate !== undefined ? { inspection_date: body.inspectionDate || null } : {}),
@@ -171,11 +229,177 @@ function buildOpportunityUpdate(
 ) {
   return {
     ...(body.commission !== undefined ? { monetaryValue: Number(body.commission || 0) } : {}),
-    ...(body.propertyAddress !== undefined ? { name: body.propertyAddress } : {}),
+    ...(body.propertyAddress !== undefined ? { name: getOpportunityName(body) } : {}),
     ...(pipelineId ? { pipelineId } : {}),
     ...(pipelineStageId ? { pipelineStageId } : {}),
     ...(body.status !== undefined ? { status: mapStatus(body.status) } : {}),
   };
+}
+
+async function searchContact(
+  accessToken: string,
+  locationId: string,
+  email?: string,
+  phone?: string,
+) {
+  const query = email || phone;
+
+  if (!query) return undefined;
+
+  const searchResponse = await fetch(CONTACTS_SEARCH_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
+    },
+    body: JSON.stringify({
+      locationId,
+      page: 1,
+      pageLimit: 10,
+      query,
+    }),
+  });
+  const rawBody = await searchResponse.text();
+
+  if (!searchResponse.ok) {
+    console.error("DoorScale contact search failed:", {
+      body: rawBody,
+      status: searchResponse.status,
+    });
+    return undefined;
+  }
+
+  const contacts = getContacts(JSON.parse(rawBody) as ContactSearchResponse);
+  const normalizedEmail = email?.trim().toLowerCase();
+  const normalizedPhone = phone?.replace(/\D/g, "");
+
+  return contacts.find((contact) => {
+    const contactEmail = contact.email?.trim().toLowerCase();
+    const contactPhone = contact.phone?.replace(/\D/g, "");
+
+    return (
+      (normalizedEmail && contactEmail === normalizedEmail) ||
+      (normalizedPhone && contactPhone === normalizedPhone)
+    );
+  });
+}
+
+async function createContact(
+  accessToken: string,
+  locationId: string,
+  body: UpdateTransactionBody,
+) {
+  const fallbackName = body.buyerName || body.sellerName || "";
+  const nameParts = fallbackName.trim().split(/\s+/);
+  const firstName = body.clientFirstName || nameParts[0] || "";
+  const lastName = body.clientLastName || nameParts.slice(1).join(" ");
+  const contactResponse = await fetch(CONTACTS_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
+    },
+    body: JSON.stringify({
+      email: body.clientEmail || undefined,
+      firstName,
+      first_name: firstName,
+      lastName,
+      last_name: lastName,
+      locationId,
+      location_id: locationId,
+      phone: body.clientPhone || undefined,
+    }),
+  });
+  const rawBody = await contactResponse.text();
+
+  if (!contactResponse.ok) {
+    console.error("DoorScale contact create failed:", {
+      body: rawBody,
+      status: contactResponse.status,
+    });
+    throw new Error("DoorScale contact create failed.");
+  }
+
+  return getContactId(JSON.parse(rawBody) as ContactCreateResponse);
+}
+
+async function updateContact(
+  accessToken: string,
+  contactId: string,
+  body: UpdateTransactionBody,
+) {
+  const updateResponse = await fetch(`${CONTACTS_URL}${contactId}`, {
+    method: "PUT",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
+    },
+    body: JSON.stringify({
+      email: body.clientEmail || undefined,
+      firstName: body.clientFirstName || undefined,
+      first_name: body.clientFirstName || undefined,
+      lastName: body.clientLastName || undefined,
+      last_name: body.clientLastName || undefined,
+      phone: body.clientPhone || undefined,
+    }),
+  });
+  const rawBody = await updateResponse.text();
+
+  if (!updateResponse.ok) {
+    console.error("DoorScale contact update failed:", {
+      body: rawBody,
+      status: updateResponse.status,
+    });
+  }
+}
+
+async function findOrCreateContact(
+  accessToken: string,
+  locationId: string,
+  body: UpdateTransactionBody,
+  existingContactId?: string | null,
+) {
+  if (existingContactId) {
+    await updateContact(accessToken, existingContactId, body);
+    return existingContactId;
+  }
+
+  const existingContact = await searchContact(
+    accessToken,
+    locationId,
+    body.clientEmail,
+    body.clientPhone,
+  );
+  const existingContactIdFromSearch = existingContact
+    ? getContactId(existingContact)
+    : undefined;
+
+  if (existingContactIdFromSearch) {
+    await updateContact(accessToken, existingContactIdFromSearch, body);
+    return existingContactIdFromSearch;
+  }
+
+  return createContact(accessToken, locationId, body);
+}
+
+function getOpportunityName(body: UpdateTransactionBody) {
+  const clientName =
+    [body.clientFirstName, body.clientLastName].filter(Boolean).join(" ").trim() ||
+    body.buyerName ||
+    body.sellerName ||
+    "";
+
+  if (body.propertyAddress?.trim()) {
+    return `${clientName} - ${body.propertyAddress.trim()}`;
+  }
+
+  return clientName ? `${clientName} Transaction` : "Transaction";
 }
 
 export default async function handler(
@@ -209,7 +433,7 @@ export default async function handler(
   });
   const { data: transaction, error: transactionError } = await supabase
     .from("transactions")
-    .select("ghl_opportunity_id, location_id")
+    .select("contact_id, ghl_contact_id, ghl_opportunity_id, location_id, stage")
     .eq("id", body.transactionId)
     .eq("location_id", activeLocationId)
     .maybeSingle();
@@ -221,50 +445,94 @@ export default async function handler(
 
   const transactionRow = transaction as TransactionRow;
   let writeBackFailed = false;
+  let contactId = transactionRow.ghl_contact_id ?? transactionRow.contact_id ?? undefined;
+  let opportunityId = transactionRow.ghl_opportunity_id ?? undefined;
   let matchedPipelineStageId: string | undefined;
 
-  if (!transactionRow.ghl_opportunity_id) {
-    writeBackFailed = true;
-    console.log("DoorScale transaction update pending linked opportunity:", {
-      selectedStage: body.stage,
-      transactionId: body.transactionId,
-    });
-  } else {
-    try {
-      const connectedAccount = await getActiveLocation(
-        request,
-        supabase,
-        "/api/ghl/transactions/update",
-      );
+  try {
+    const connectedAccount = await getActiveLocation(
+      request,
+      supabase,
+      "/api/ghl/transactions/update",
+    );
 
-      if (connectedAccount.location_id !== transactionRow.location_id) {
-        throw new Error("DoorScale account does not match this transaction.");
+    if (connectedAccount.location_id !== transactionRow.location_id) {
+      throw new Error("DoorScale account does not match this transaction.");
+    }
+
+    let pipelineId: string | undefined;
+    let pipelineStageId: string | undefined;
+
+    const selectedStage = body.stage || transactionRow.stage || "";
+
+    if (selectedStage) {
+      const pipelineConfig = await getPipelineConfig(
+        connectedAccount.access_token,
+        connectedAccount.location_id,
+      );
+      pipelineId = pipelineConfig.pipelineId;
+      pipelineStageId = pipelineConfig.stageMap.get(normalize(selectedStage));
+      matchedPipelineStageId = pipelineStageId;
+
+      console.log("DoorScale transaction stage update mapping:", {
+        ghl_opportunity_id: transactionRow.ghl_opportunity_id,
+        matchedPipelineStageId,
+        selectedStage,
+        transactionId: body.transactionId,
+      });
+
+      if (!pipelineStageId) {
+        throw new Error("DoorScale stage could not be matched.");
+      }
+    }
+
+    contactId = await findOrCreateContact(
+      connectedAccount.access_token,
+      connectedAccount.location_id,
+      body,
+      contactId,
+    );
+
+    if (!contactId) {
+      throw new Error("DoorScale contact could not be created.");
+    }
+
+    if (!transactionRow.ghl_opportunity_id) {
+      if (!pipelineId || !pipelineStageId) {
+        throw new Error("DoorScale stage could not be matched.");
       }
 
-      let pipelineId: string | undefined;
-      let pipelineStageId: string | undefined;
+      const createResponse = await fetch(OPPORTUNITIES_URL, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${connectedAccount.access_token}`,
+          "Content-Type": "application/json",
+          Version: API_VERSION,
+        },
+        body: JSON.stringify({
+          contactId,
+          locationId: connectedAccount.location_id,
+          monetaryValue: Number(body.commission || 0),
+          name: getOpportunityName(body),
+          pipelineId,
+          pipelineStageId,
+          status: "open",
+        }),
+      });
+      const rawBody = await createResponse.text();
 
-      if (body.stage) {
-        const pipelineConfig = await getPipelineConfig(
-          connectedAccount.access_token,
-          connectedAccount.location_id,
-        );
-        pipelineId = pipelineConfig.pipelineId;
-        pipelineStageId = pipelineConfig.stageMap.get(normalize(body.stage));
-        matchedPipelineStageId = pipelineStageId;
-
-        console.log("DoorScale transaction stage update mapping:", {
-          ghl_opportunity_id: transactionRow.ghl_opportunity_id,
-          matchedPipelineStageId,
-          selectedStage: body.stage,
+      if (!createResponse.ok) {
+        console.error("DoorScale opportunity create failed:", {
+          body: rawBody,
+          status: createResponse.status,
           transactionId: body.transactionId,
         });
-
-        if (!pipelineStageId) {
-          throw new Error("DoorScale stage could not be matched.");
-        }
+        throw new Error("DoorScale opportunity create failed.");
       }
 
+      opportunityId = getOpportunityId(JSON.parse(rawBody) as OpportunityResponse);
+    } else {
       const updateResponse = await fetch(
         `${OPPORTUNITIES_URL}/${transactionRow.ghl_opportunity_id}`,
         {
@@ -302,16 +570,28 @@ export default async function handler(
         });
         throw new Error("DoorScale opportunity update failed.");
       }
-    } catch (error) {
-      writeBackFailed = true;
-      console.error("DoorScale transaction update write-back failed:", error);
     }
+  } catch (error) {
+    writeBackFailed = true;
+    console.error("DoorScale transaction update write-back failed:", error);
   }
 
+  const clientName = [body.clientFirstName, body.clientLastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   const { error: updateError } = await supabase
     .from("transactions")
     .update({
       ...buildLocalUpdate(body),
+      ...(contactId
+        ? {
+            contact_id: contactId,
+            ghl_contact_id: contactId,
+          }
+        : {}),
+      ...(opportunityId ? { ghl_opportunity_id: opportunityId } : {}),
+      ...(clientName ? { contact_name: clientName } : {}),
       ...getSyncFields(body, writeBackFailed),
     })
     .eq("id", body.transactionId)

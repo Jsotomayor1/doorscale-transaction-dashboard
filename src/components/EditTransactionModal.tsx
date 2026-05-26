@@ -31,6 +31,10 @@ export function EditTransactionModal({
   const fields = transaction.customFields;
   const [form, setForm] = useState<UpdateTransactionDetailsInput>(() => ({
     transactionId: String(transaction.id),
+    clientEmail: fields.contactEmail || "",
+    clientFirstName: transaction.customFields.contactName?.split(/\s+/)[0] || "",
+    clientLastName: transaction.customFields.contactName?.split(/\s+/).slice(1).join(" ") || "",
+    clientPhone: fields.contactPhone || "",
     propertyAddress: fields.propertyAddress || transaction.name,
     transactionType: fields.transactionType,
     buyerName: fields.buyerName,
@@ -61,6 +65,11 @@ export function EditTransactionModal({
       return;
     }
 
+    if (!form.clientEmail.trim() && !form.clientPhone.trim()) {
+      setFormError("Client Email or Phone is required.");
+      return;
+    }
+
     if (!form.transactionType) {
       setFormError("Transaction Type is required.");
       return;
@@ -71,6 +80,10 @@ export function EditTransactionModal({
     try {
       await onSave({
         ...form,
+        clientEmail: form.clientEmail.trim(),
+        clientFirstName: form.clientFirstName.trim(),
+        clientLastName: form.clientLastName.trim(),
+        clientPhone: form.clientPhone.trim(),
         propertyAddress: form.propertyAddress.trim(),
         buyerName: form.buyerName.trim(),
         sellerName: form.sellerName.trim(),
@@ -111,6 +124,48 @@ export function EditTransactionModal({
         </div>
 
         <form className="transaction-form" onSubmit={handleSubmit}>
+          <div className="form-field form-field--full">
+            <span>Client / Contact</span>
+          </div>
+
+          <label className="form-field">
+            <span>Client First Name</span>
+            <input
+              onChange={(event) =>
+                updateField("clientFirstName", event.target.value)
+              }
+              value={form.clientFirstName}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Client Last Name</span>
+            <input
+              onChange={(event) =>
+                updateField("clientLastName", event.target.value)
+              }
+              value={form.clientLastName}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Client Email</span>
+            <input
+              onChange={(event) => updateField("clientEmail", event.target.value)}
+              type="email"
+              value={form.clientEmail}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Client Phone</span>
+            <input
+              onChange={(event) => updateField("clientPhone", event.target.value)}
+              type="tel"
+              value={form.clientPhone}
+            />
+          </label>
+
           <label className="form-field form-field--full">
             <span>Property Address</span>
             <input

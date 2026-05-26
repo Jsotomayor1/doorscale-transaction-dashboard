@@ -73,6 +73,10 @@ export type CreateTaskInput = {
 
 export type UpdateTransactionDetailsInput = {
   transactionId: string;
+  clientEmail: string;
+  clientFirstName: string;
+  clientLastName: string;
+  clientPhone: string;
   propertyAddress: string;
   transactionType: string;
   buyerName: string;
@@ -1138,10 +1142,22 @@ export function useCrmData() {
               ? {
                   ...transaction,
                   clientName:
+                    [input.clientFirstName, input.clientLastName]
+                      .filter(Boolean)
+                      .join(" ") ||
                     input.buyerName ||
                     input.sellerName ||
                     input.propertyAddress ||
                     transaction.clientName,
+                  clientEmail: input.clientEmail,
+                  clientFirstName: input.clientFirstName,
+                  clientLastName: input.clientLastName,
+                  clientPhone: input.clientPhone,
+                  contactEmail: input.clientEmail,
+                  contactName: [input.clientFirstName, input.clientLastName]
+                    .filter(Boolean)
+                    .join(" "),
+                  contactPhone: input.clientPhone,
                   propertyAddress: input.propertyAddress,
                   type: input.transactionType,
                   closeDate: input.closingDate,
@@ -1167,6 +1183,11 @@ export function useCrmData() {
                     ...opportunity.customFields,
                     propertyAddress: input.propertyAddress,
                     transactionType: input.transactionType,
+                    contactEmail: input.clientEmail,
+                    contactName: [input.clientFirstName, input.clientLastName]
+                      .filter(Boolean)
+                      .join(" "),
+                    contactPhone: input.clientPhone,
                     buyerName: input.buyerName,
                     sellerName: input.sellerName,
                     closingDate: input.closingDate,
