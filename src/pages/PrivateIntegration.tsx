@@ -58,7 +58,7 @@ export default function PrivateIntegration() {
       }
 
       setForm(initialForm);
-      setMessage(result.message || "DoorScale connection saved.");
+      setMessage(result.message || "DoorScale connected successfully.");
       window.setTimeout(() => {
         window.location.href = "/";
       }, 900);
