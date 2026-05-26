@@ -76,9 +76,9 @@ export default function Commissions() {
           <Card key={transaction.id}>
             <CardHeader>
               <div>
-                <CardTitle>{transaction.propertyAddress}</CardTitle>
+                <CardTitle>{transaction.clientName}</CardTitle>
                 <CardDescription>
-                  {transaction.type || "Transaction type not set"}
+                  {transaction.propertyAddress || transaction.type || "Transaction type not set"}
                 </CardDescription>
               </div>
               <Badge
@@ -95,7 +95,7 @@ export default function Commissions() {
             </CardHeader>
             <CardContent>
               <div className="commission-row">
-                <span>{transaction.buyerName || transaction.sellerName || "Client pending"}</span>
+                <span>{transaction.type || "Transaction type not set"}</span>
                 <strong>{formatCurrency(transaction.commission)}</strong>
               </div>
             </CardContent>

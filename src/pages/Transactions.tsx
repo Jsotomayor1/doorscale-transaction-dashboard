@@ -115,7 +115,7 @@ export default function Transactions() {
       <section className="entity-grid" aria-label="Transactions">
         {filteredTransactions.map((transaction) => (
           <Link
-            aria-label={`Open transaction ${transaction.propertyAddress}`}
+            aria-label={`Open transaction ${transaction.clientName}`}
             className="transaction-card-link"
             key={transaction.id}
             to={withActiveLocationPath(`/transactions/${transaction.id}`)}
@@ -123,8 +123,10 @@ export default function Transactions() {
             <Card>
               <CardHeader>
                 <div>
-                  <CardTitle>{transaction.propertyAddress}</CardTitle>
-                  <CardDescription>{participantLine(transaction)}</CardDescription>
+                  <CardTitle>{transaction.clientName}</CardTitle>
+                  <CardDescription>
+                    {transaction.propertyAddress || participantLine(transaction)}
+                  </CardDescription>
                 </div>
                 <Badge variant={stageVariant(transaction.stage)}>
                   {transaction.stage}

@@ -8,6 +8,10 @@ import {
 } from "@/hooks/use-crm-data";
 
 const initialForm: NewTransactionInput = {
+  clientEmail: "",
+  clientFirstName: "",
+  clientLastName: "",
+  clientPhone: "",
   propertyAddress: "",
   transactionType: "",
   stage: "Pre-listing",
@@ -46,6 +50,21 @@ export function NewTransactionModal({
     event.preventDefault();
     setFormError("");
 
+    if (!form.clientFirstName.trim()) {
+      setFormError("Client First Name is required.");
+      return;
+    }
+
+    if (!form.clientLastName.trim()) {
+      setFormError("Client Last Name is required.");
+      return;
+    }
+
+    if (!form.clientEmail.trim() && !form.clientPhone.trim()) {
+      setFormError("Client Email or Phone is required.");
+      return;
+    }
+
     if (!form.propertyAddress.trim()) {
       setFormError("Property Address is required.");
       return;
@@ -66,6 +85,10 @@ export function NewTransactionModal({
     try {
       await onCreate({
         ...form,
+        clientEmail: form.clientEmail.trim(),
+        clientFirstName: form.clientFirstName.trim(),
+        clientLastName: form.clientLastName.trim(),
+        clientPhone: form.clientPhone.trim(),
         propertyAddress: form.propertyAddress.trim(),
         buyerName: form.buyerName.trim(),
         sellerName: form.sellerName.trim(),
@@ -107,6 +130,50 @@ export function NewTransactionModal({
         </div>
 
         <form className="transaction-form" onSubmit={handleSubmit}>
+          <label className="form-field">
+            <span>Client First Name</span>
+            <input
+              onChange={(event) =>
+                updateField("clientFirstName", event.target.value)
+              }
+              required
+              value={form.clientFirstName}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Client Last Name</span>
+            <input
+              onChange={(event) =>
+                updateField("clientLastName", event.target.value)
+              }
+              required
+              value={form.clientLastName}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Client Email</span>
+            <input
+              onChange={(event) =>
+                updateField("clientEmail", event.target.value)
+              }
+              type="email"
+              value={form.clientEmail}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Client Phone</span>
+            <input
+              onChange={(event) =>
+                updateField("clientPhone", event.target.value)
+              }
+              type="tel"
+              value={form.clientPhone}
+            />
+          </label>
+
           <label className="form-field form-field--full">
             <span>Property Address</span>
             <input

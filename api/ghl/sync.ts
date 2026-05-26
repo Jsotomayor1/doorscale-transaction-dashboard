@@ -212,6 +212,10 @@ type ExistingTransaction = {
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;
+  client_email?: string | null;
+  client_first_name?: string | null;
+  client_last_name?: string | null;
+  client_phone?: string | null;
 };
 
 type TransactionUpsertPayload = {
@@ -224,6 +228,10 @@ type TransactionUpsertPayload = {
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;
+  client_email: string | null;
+  client_first_name: string | null;
+  client_last_name: string | null;
+  client_phone: string | null;
   property_address: string;
   transaction_type: string;
   stage: string;
@@ -853,6 +861,25 @@ function getContactName(opportunity: DoorScaleOpportunity) {
   return fullName || opportunity.contact?.name || null;
 }
 
+function getContactNameParts(opportunity: DoorScaleOpportunity) {
+  const firstName = opportunity.contact?.first_name ?? opportunity.contact?.firstName ?? "";
+  const lastName = opportunity.contact?.last_name ?? opportunity.contact?.lastName ?? "";
+
+  if (firstName || lastName) {
+    return {
+      firstName,
+      lastName,
+    };
+  }
+
+  const nameParts = (opportunity.contact?.name ?? "").trim().split(/\s+/);
+
+  return {
+    firstName: nameParts[0] ?? "",
+    lastName: nameParts.slice(1).join(" "),
+  };
+}
+
 function getObjectTransaction(opportunity: DoorScaleOpportunity) {
   return (
     opportunity.custom_objects?.transactions ??
@@ -978,6 +1005,8 @@ function mapOpportunityToTransaction(
     existing?.ghl_location_id ??
     fallbackLocationId;
   const locationId = fallbackLocationId;
+  const contactNameParts = getContactNameParts(opportunity);
+  const propertyAddress = getObjectPropertyAddress(opportunity, fieldMap);
 
   return {
     location_id: locationId,
@@ -1005,10 +1034,30 @@ function mapOpportunityToTransaction(
       existing?.contact_phone,
       "",
     ),
+    client_email: keepExistingWhenEmpty(
+      opportunity.contact?.email ?? null,
+      existing?.client_email,
+      "",
+    ) || null,
+    client_first_name: keepExistingWhenEmpty(
+      contactNameParts.firstName,
+      existing?.client_first_name,
+      "",
+    ) || null,
+    client_last_name: keepExistingWhenEmpty(
+      contactNameParts.lastName,
+      existing?.client_last_name,
+      "",
+    ) || null,
+    client_phone: keepExistingWhenEmpty(
+      opportunity.contact?.phone ?? null,
+      existing?.client_phone,
+      "",
+    ) || null,
     property_address: keepExistingWhenEmpty(
-      getObjectPropertyAddress(opportunity, fieldMap) ?? opportunity.name,
+      propertyAddress,
       existing?.property_address,
-      "Untitled Transaction",
+      "",
     ),
     transaction_type: keepExistingWhenEmpty(
       transactionType,
@@ -1440,7 +1489,7 @@ export default async function handler(
     await supabase
       .from("transactions")
       .select(
-        "id, ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, ghl_contact_id, ghl_location_id, property_address, assigned_to, contact_name, contact_email, contact_phone, commission, status",
+        "id, ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, ghl_contact_id, ghl_location_id, property_address, assigned_to, contact_name, contact_email, contact_phone, client_first_name, client_last_name, client_email, client_phone, commission, status",
       )
       .eq("location_id", selectedLocationId)
       .in("ghl_opportunity_id", opportunityIds);
