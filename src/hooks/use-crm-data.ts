@@ -267,7 +267,6 @@ type SupabaseDocumentTemplate = {
   id: string;
   location_id?: string | null;
   document_type: string | null;
-  document_name: string | null;
   sort_order: number | null;
 };
 
@@ -771,7 +770,7 @@ async function generateDocumentChecklist(
 ) {
   const { data: templates, error: templateError } = await client
     .from("document_templates")
-    .select("id, location_id, document_type, document_name, sort_order")
+    .select("id, location_id, document_type, sort_order")
     .in("location_id", [activeLocationId, "demo-location", "global"])
     .eq("transaction_type", transactionType)
     .eq("stage", stage)
@@ -819,7 +818,7 @@ async function generateDocumentChecklist(
       location_id: activeLocationId,
       transaction_id: transactionId,
       document_type: template.document_type,
-      document_name: template.document_name || template.document_type,
+      document_name: template.document_type,
       status: "needed",
     }));
 

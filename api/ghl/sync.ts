@@ -1098,7 +1098,6 @@ function dedupeTasksByExternalId(tasks: TaskUpsertPayload[]) {
 }
 
 type DocumentTemplate = {
-  document_name: string | null;
   document_type: string | null;
   location_id?: string | null;
 };
@@ -1118,7 +1117,7 @@ async function generateDocumentChecklist(
 
   const { data: templates, error: templateError } = await supabase
     .from("document_templates")
-    .select("document_type, document_name, location_id")
+    .select("document_type, location_id")
     .in("location_id", [locationId, "demo-location", "global"])
     .eq("transaction_type", transaction.transaction_type)
     .eq("stage", transaction.stage);
@@ -1168,7 +1167,7 @@ async function generateDocumentChecklist(
       location_id: locationId,
       transaction_id: transaction.id,
       document_type: template.document_type,
-      document_name: template.document_name || template.document_type,
+      document_name: template.document_type,
       status: "needed",
     }));
 
