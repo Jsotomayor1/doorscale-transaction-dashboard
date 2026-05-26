@@ -67,6 +67,13 @@ function getStageName(stage: PipelineStage) {
   return stage.name ?? stage.title;
 }
 
+const normalize = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ");
+
 function getPipelines(payload: PipelinesResponse) {
   if (Array.isArray(payload.pipelines)) return payload.pipelines;
   if (Array.isArray(payload.data)) return payload.data;
@@ -114,7 +121,10 @@ async function getPipelineConfig(accessToken: string, locationId: string) {
   const stages = pipeline.stages ?? pipeline.pipelineStages ?? [];
   const stageMap = new Map(
     stages
-      .map((stage) => [getStageName(stage), getStageId(stage)] as const)
+      .map((stage) => {
+        const stageName = getStageName(stage);
+        return [stageName ? normalize(stageName) : undefined, getStageId(stage)] as const;
+      })
       .filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1])),
   );
 
@@ -240,7 +250,7 @@ export default async function handler(
           connectedAccount.location_id,
         );
         pipelineId = pipelineConfig.pipelineId;
-        pipelineStageId = pipelineConfig.stageMap.get(body.stage);
+        pipelineStageId = pipelineConfig.stageMap.get(normalize(body.stage));
         matchedPipelineStageId = pipelineStageId;
 
         console.log("DoorScale transaction stage update mapping:", {
