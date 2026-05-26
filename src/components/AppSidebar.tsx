@@ -10,6 +10,7 @@ import {
 import { useEffect, useState } from "react";
 import { NavLink } from "@/components/NavLink";
 import {
+  getDoorScaleLocationHeaders,
   getStoredActiveLocationId,
   setStoredActiveLocationId,
 } from "@/lib/active-location";
@@ -70,9 +71,10 @@ export function AppSidebar() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(),
         },
         body: JSON.stringify({
-          locationId: getStoredActiveLocationId(),
+          active_location_id: getStoredActiveLocationId(),
         }),
       });
       const result = (await response.json().catch(() => ({}))) as {

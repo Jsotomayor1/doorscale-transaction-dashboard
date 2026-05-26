@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { getActiveLocation, logRouteDataCounts } from "./_active-location";
 
 const OPPORTUNITIES_URL =
   "https://services.leadconnectorhq.com/opportunities/search";
@@ -28,10 +29,6 @@ type StoredConnection = {
   selected_location_id?: string | null;
   is_bulk_installation?: boolean | null;
   user_type?: string | null;
-};
-
-type SyncRequestBody = {
-  locationId?: string;
 };
 
 type LocationTokenResponse = {
@@ -975,18 +972,19 @@ function mapOpportunityToTransaction(
     existing?.ghl_contact_id ??
     existing?.contact_id ??
     null;
-  const locationId =
+  const opportunityLocationId =
     opportunity.locationId ??
     opportunity.location_id ??
     existing?.ghl_location_id ??
     fallbackLocationId;
+  const locationId = fallbackLocationId;
 
   return {
     location_id: locationId,
     ghl_opportunity_id: opportunity.id,
     contact_id: contactId,
     ghl_contact_id: contactId ?? existing?.ghl_contact_id ?? null,
-    ghl_location_id: locationId,
+    ghl_location_id: opportunityLocationId,
     assigned_to: keepExistingWhenEmpty(
       getOpportunityAssignedTo(opportunity),
       existing?.assigned_to,
@@ -1102,6 +1100,7 @@ function dedupeTasksByExternalId(tasks: TaskUpsertPayload[]) {
 type DocumentTemplate = {
   document_name: string | null;
   document_type: string | null;
+  location_id?: string | null;
 };
 
 type ExistingDocument = {
@@ -1119,8 +1118,8 @@ async function generateDocumentChecklist(
 
   const { data: templates, error: templateError } = await supabase
     .from("document_templates")
-    .select("document_type, document_name")
-    .eq("location_id", locationId)
+    .select("document_type, document_name, location_id")
+    .in("location_id", [locationId, "demo-location", "global"])
     .eq("transaction_type", transaction.transaction_type)
     .eq("stage", transaction.stage);
 
@@ -1129,7 +1128,16 @@ async function generateDocumentChecklist(
     return;
   }
 
-  const documentTemplates = (templates ?? []) as DocumentTemplate[];
+  const templateRows = (templates ?? []) as DocumentTemplate[];
+  const locationSpecificTemplates = templateRows.filter(
+    (template) => template.location_id === locationId,
+  );
+  const documentTemplates =
+    locationSpecificTemplates.length > 0
+      ? locationSpecificTemplates
+      : templateRows.filter((template) =>
+          ["demo-location", "global"].includes(template.location_id ?? ""),
+        );
 
   if (!documentTemplates.length) {
     return;
@@ -1161,7 +1169,7 @@ async function generateDocumentChecklist(
       transaction_id: transaction.id,
       document_type: template.document_type,
       document_name: template.document_name || template.document_type,
-      status: "Needed",
+      status: "needed",
     }));
 
   if (!rows.length) {
@@ -1293,49 +1301,30 @@ export default async function handler(
     },
   });
 
-  const body = (request.body ?? {}) as SyncRequestBody;
-  const activeLocationId =
-    typeof body.locationId === "string" ? body.locationId.trim() : "";
-  let connectionQuery = supabase
-    .from("ghl_locations")
-    .select(
-      "access_token, company_id, created_at, connection_status, is_bulk_installation, location_access_token, location_refresh_token, location_token_expires_at, location_id, parent_connection_id, selected_at, selected_location_id, user_type",
-    )
-    .or("connection_status.eq.connected,connection_status.is.null")
-    .not("location_id", "like", "company:%");
+  let activeLocation;
 
-  if (activeLocationId) {
-    connectionQuery = connectionQuery.eq("location_id", activeLocationId);
-  }
-
-  const { data: connections, error: connectionError } = await connectionQuery
-    .order("selected_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (connectionError) {
-    console.error("DoorScale sync connection lookup failed:", connectionError);
-    response.status(500).json({
+  try {
+    activeLocation = await getActiveLocation(request, supabase, "/api/ghl/sync");
+  } catch (error) {
+    console.error("DoorScale sync active account failed:", error);
+    response.status(409).json({
       ok: false,
-      message: "Unable to sync DoorScale data.",
-    });
-    return;
-  }
-
-  const connection = connections?.[0] as StoredConnection | undefined;
-
-  if (!connection) {
-    response.status(404).json({
-      ok: false,
-      message: "DoorScale account is not connected.",
+      message: "Choose a DoorScale account before syncing.",
     });
     return;
   }
 
   console.log("DoorScale sync active account:", {
-    activeLocationId: activeLocationId || null,
-    connectionLocationId: connection.location_id,
+    activeLocationId: activeLocation.location_id,
+    connectionId: activeLocation.id,
   });
+
+  const connection: StoredConnection = {
+    access_token: activeLocation.access_token,
+    location_id: activeLocation.location_id,
+    selected_location_id: activeLocation.location_id,
+    user_type: "PrivateIntegration",
+  };
 
   let syncToken: string;
   let selectedLocationId: string;
@@ -1363,6 +1352,11 @@ export default async function handler(
     response.status(200).json({
       ok: false,
       message: "Transaction Management System pipeline was not found.",
+    });
+    logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
+      documents: 0,
+      tasks: 0,
+      transactions: 0,
     });
     return;
   }
@@ -1568,6 +1562,11 @@ export default async function handler(
       pipelineIdUsed,
       skippedOpportunities,
     });
+    logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
+      documents: syncedTransactionRows.length,
+      tasks: syncedTasks,
+      transactions: syncedTransactionRows.length,
+    });
     return;
   }
 
@@ -1581,5 +1580,10 @@ export default async function handler(
     pipelineNameUsed,
     pipelineIdUsed,
     skippedOpportunities,
+  });
+  logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
+    documents: 0,
+    tasks: 0,
+    transactions: 0,
   });
 }

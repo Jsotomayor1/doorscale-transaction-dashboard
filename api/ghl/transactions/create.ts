@@ -1,15 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import {
+  getActiveLocation,
+  getRequestedLocationId,
+  logRouteDataCounts,
+} from "../_active-location";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
 const API_VERSION = "2021-07-28";
 const PIPELINE_NAME = "Transaction Management System";
-
-type ConnectedAccount = {
-  access_token: string;
-  location_id: string;
-};
 
 type PipelineStage = {
   id?: string;
@@ -91,31 +91,6 @@ function mapStatus(status?: string) {
   }
 }
 
-async function getConnectedAccount(
-  supabase: ReturnType<typeof createClient>,
-  locationId?: string,
-) {
-  let query = supabase
-    .from("ghl_locations")
-    .select("access_token, location_id")
-    .or("connection_status.eq.connected,connection_status.is.null")
-    .not("location_id", "like", "company:%");
-
-  if (locationId) {
-    query = query.eq("location_id", locationId);
-  }
-
-  const { data, error } = await query
-    .order("selected_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw error;
-
-  return data as ConnectedAccount | null;
-}
-
 async function getPipelineConfig(accessToken: string, locationId: string) {
   const pipelinesUrl = new URL(PIPELINES_URL);
   pipelinesUrl.searchParams.set("locationId", locationId);
@@ -178,7 +153,9 @@ export default async function handler(
     return;
   }
 
-  if (!body.locationId) {
+  const activeLocationId = getRequestedLocationId(request);
+
+  if (!activeLocationId) {
     response.status(400).json({ ok: false, message: "DoorScale account is required." });
     return;
   }
@@ -191,10 +168,14 @@ export default async function handler(
   let writeBackFailed = false;
 
   try {
-    const connectedAccount = await getConnectedAccount(supabase, body.locationId);
+    const connectedAccount = await getActiveLocation(
+      request,
+      supabase,
+      "/api/ghl/transactions/create",
+    );
 
-    if (!connectedAccount?.access_token) {
-      throw new Error("DoorScale account is not connected.");
+    if (connectedAccount.location_id !== activeLocationId) {
+      throw new Error("DoorScale account does not match this transaction.");
     }
 
     linkedLocationId = connectedAccount.location_id;
@@ -249,7 +230,7 @@ export default async function handler(
     ghl_location_id: linkedLocationId,
     ghl_opportunity_id: opportunityId ?? null,
     inspection_date: body.inspectionDate || null,
-    location_id: body.locationId,
+    location_id: activeLocationId,
     property_address: body.propertyAddress,
     seller_name: body.sellerName || null,
     stage: body.stage,
@@ -266,7 +247,7 @@ export default async function handler(
         .from("transactions")
         .update(transactionRow)
         .eq("id", body.transactionId)
-        .eq("location_id", body.locationId)
+        .eq("location_id", activeLocationId)
         .select("id")
         .single()
     : supabase.from("transactions").insert(transactionRow).select("id").single();
@@ -284,5 +265,8 @@ export default async function handler(
       ? "Transaction saved locally. DoorScale sync will retry later."
       : "Transaction saved.",
     transactionId: savedTransaction?.id,
+  });
+  logRouteDataCounts("/api/ghl/transactions/create", activeLocationId, {
+    transactions: savedTransaction ? 1 : 0,
   });
 }

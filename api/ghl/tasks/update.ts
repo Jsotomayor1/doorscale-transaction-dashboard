@@ -1,13 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import {
+  getActiveLocation,
+  getRequestedLocationId,
+  logRouteDataCounts,
+} from "../_active-location";
 
 const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
 const API_VERSION = "2021-07-28";
-
-type ConnectedAccount = {
-  access_token: string;
-  location_id: string;
-};
 
 type TaskRow = {
   assigned_to: string | null;
@@ -28,28 +28,6 @@ type UpdateTaskBody = {
   taskId?: string;
   title?: string;
 };
-
-async function getConnectedAccount(
-  supabase: ReturnType<typeof createClient>,
-  locationId: string,
-) {
-  const { data, error } = await supabase
-    .from("ghl_locations")
-    .select("access_token, location_id")
-    .or("connection_status.eq.connected,connection_status.is.null")
-    .not("location_id", "like", "company:%")
-    .eq("location_id", locationId)
-    .order("selected_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return data as ConnectedAccount | null;
-}
 
 function buildLocalUpdate(body: UpdateTaskBody) {
   return {
@@ -105,7 +83,9 @@ export default async function handler(
 
   const body = request.body as UpdateTaskBody;
 
-  if (!body.taskId || !body.locationId) {
+  const activeLocationId = getRequestedLocationId(request);
+
+  if (!body.taskId || !activeLocationId) {
     response.status(400).json({ ok: false, message: "Task details are missing." });
     return;
   }
@@ -118,7 +98,7 @@ export default async function handler(
     .from("tasks")
     .select("assigned_to, due_date, due_datetime, ghl_task_id, location_id, status, title")
     .eq("id", body.taskId)
-    .eq("location_id", body.locationId)
+    .eq("location_id", activeLocationId)
     .maybeSingle();
 
   if (taskError || !currentTask) {
@@ -131,11 +111,11 @@ export default async function handler(
 
   if (task.ghl_task_id) {
     try {
-      const connectedAccount = await getConnectedAccount(supabase, body.locationId);
-
-      if (!connectedAccount?.access_token) {
-        throw new Error("DoorScale account is not connected.");
-      }
+      const connectedAccount = await getActiveLocation(
+        request,
+        supabase,
+        "/api/ghl/tasks/update",
+      );
 
       if (connectedAccount.location_id !== task.location_id) {
         throw new Error("DoorScale account does not match this task.");
@@ -176,7 +156,7 @@ export default async function handler(
       ...getSyncFields(writeBackFailed),
     })
     .eq("id", body.taskId)
-    .eq("location_id", body.locationId);
+    .eq("location_id", activeLocationId);
 
   if (updateError) {
     console.error("Local task update failed:", updateError);
@@ -189,5 +169,8 @@ export default async function handler(
     message: writeBackFailed
       ? "Task saved locally. DoorScale sync will retry later."
       : "Task saved.",
+  });
+  logRouteDataCounts("/api/ghl/tasks/update", activeLocationId, {
+    tasks: 1,
   });
 }

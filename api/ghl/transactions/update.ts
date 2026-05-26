@@ -1,15 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import {
+  getActiveLocation,
+  getRequestedLocationId,
+  logRouteDataCounts,
+} from "../_active-location";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities";
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
 const API_VERSION = "2021-07-28";
 const PIPELINE_NAME = "Transaction Management System";
-
-type ConnectedAccount = {
-  access_token: string;
-  location_id: string;
-};
 
 type PipelineStage = {
   id?: string;
@@ -84,26 +84,6 @@ function mapStatus(status?: string) {
     default:
       return status;
   }
-}
-
-async function getConnectedAccount(
-  supabase: ReturnType<typeof createClient>,
-  locationId: string,
-) {
-  const { data, error } = await supabase
-    .from("ghl_locations")
-    .select("access_token, location_id")
-    .or("connection_status.eq.connected,connection_status.is.null")
-    .not("location_id", "like", "company:%")
-    .eq("location_id", locationId)
-    .order("selected_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw error;
-
-  return data as ConnectedAccount | null;
 }
 
 async function getPipelineConfig(accessToken: string, locationId: string) {
@@ -207,7 +187,9 @@ export default async function handler(
 
   const body = request.body as UpdateTransactionBody;
 
-  if (!body.transactionId || !body.locationId) {
+  const activeLocationId = getRequestedLocationId(request);
+
+  if (!body.transactionId || !activeLocationId) {
     response.status(400).json({ ok: false, message: "Transaction details are missing." });
     return;
   }
@@ -219,7 +201,7 @@ export default async function handler(
     .from("transactions")
     .select("ghl_opportunity_id, location_id")
     .eq("id", body.transactionId)
-    .eq("location_id", body.locationId)
+    .eq("location_id", activeLocationId)
     .maybeSingle();
 
   if (transactionError || !transaction) {
@@ -239,11 +221,11 @@ export default async function handler(
     });
   } else {
     try {
-      const connectedAccount = await getConnectedAccount(supabase, body.locationId);
-
-      if (!connectedAccount?.access_token) {
-        throw new Error("DoorScale account is not connected.");
-      }
+      const connectedAccount = await getActiveLocation(
+        request,
+        supabase,
+        "/api/ghl/transactions/update",
+      );
 
       if (connectedAccount.location_id !== transactionRow.location_id) {
         throw new Error("DoorScale account does not match this transaction.");
@@ -323,7 +305,7 @@ export default async function handler(
       ...getSyncFields(body, writeBackFailed),
     })
     .eq("id", body.transactionId)
-    .eq("location_id", body.locationId);
+    .eq("location_id", activeLocationId);
 
   if (updateError) {
     console.error("Local transaction update failed:", updateError);
@@ -334,5 +316,8 @@ export default async function handler(
   response.status(200).json({
     ok: !writeBackFailed,
     message: getLocalSaveMessage(body, writeBackFailed),
+  });
+  logRouteDataCounts("/api/ghl/transactions/update", activeLocationId, {
+    transactions: 1,
   });
 }

@@ -1,0 +1,966 @@
+﻿diff --git a/api/ghl/sync.ts b/api/ghl/sync.ts
+index 7e41e22..4b206b2 100644
+--- a/api/ghl/sync.ts
++++ b/api/ghl/sync.ts
+@@ -1,5 +1,6 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
++import { getActiveLocation, logRouteDataCounts } from "./_active-location";
+ 
+ const OPPORTUNITIES_URL =
+   "https://services.leadconnectorhq.com/opportunities/search";
+@@ -30,10 +31,6 @@ type StoredConnection = {
+   user_type?: string | null;
+ };
+ 
+-type SyncRequestBody = {
+-  locationId?: string;
+-};
+-
+ type LocationTokenResponse = {
+   access_token?: string;
+   expires_in?: number;
+@@ -975,18 +972,19 @@ function mapOpportunityToTransaction(
+     existing?.ghl_contact_id ??
+     existing?.contact_id ??
+     null;
+-  const locationId =
++  const opportunityLocationId =
+     opportunity.locationId ??
+     opportunity.location_id ??
+     existing?.ghl_location_id ??
+     fallbackLocationId;
++  const locationId = fallbackLocationId;
+ 
+   return {
+     location_id: locationId,
+     ghl_opportunity_id: opportunity.id,
+     contact_id: contactId,
+     ghl_contact_id: contactId ?? existing?.ghl_contact_id ?? null,
+-    ghl_location_id: locationId,
++    ghl_location_id: opportunityLocationId,
+     assigned_to: keepExistingWhenEmpty(
+       getOpportunityAssignedTo(opportunity),
+       existing?.assigned_to,
+@@ -1102,6 +1100,7 @@ function dedupeTasksByExternalId(tasks: TaskUpsertPayload[]) {
+ type DocumentTemplate = {
+   document_name: string | null;
+   document_type: string | null;
++  location_id?: string | null;
+ };
+ 
+ type ExistingDocument = {
+@@ -1119,8 +1118,8 @@ async function generateDocumentChecklist(
+ 
+   const { data: templates, error: templateError } = await supabase
+     .from("document_templates")
+-    .select("document_type, document_name")
+-    .eq("location_id", locationId)
++    .select("document_type, document_name, location_id")
++    .in("location_id", [locationId, "demo-location", "global"])
+     .eq("transaction_type", transaction.transaction_type)
+     .eq("stage", transaction.stage);
+ 
+@@ -1129,7 +1128,16 @@ async function generateDocumentChecklist(
+     return;
+   }
+ 
+-  const documentTemplates = (templates ?? []) as DocumentTemplate[];
++  const templateRows = (templates ?? []) as DocumentTemplate[];
++  const locationSpecificTemplates = templateRows.filter(
++    (template) => template.location_id === locationId,
++  );
++  const documentTemplates =
++    locationSpecificTemplates.length > 0
++      ? locationSpecificTemplates
++      : templateRows.filter((template) =>
++          ["demo-location", "global"].includes(template.location_id ?? ""),
++        );
+ 
+   if (!documentTemplates.length) {
+     return;
+@@ -1161,7 +1169,7 @@ async function generateDocumentChecklist(
+       transaction_id: transaction.id,
+       document_type: template.document_type,
+       document_name: template.document_name || template.document_type,
+-      status: "Needed",
++      status: "needed",
+     }));
+ 
+   if (!rows.length) {
+@@ -1293,50 +1301,31 @@ export default async function handler(
+     },
+   });
+ 
+-  const body = (request.body ?? {}) as SyncRequestBody;
+-  const activeLocationId =
+-    typeof body.locationId === "string" ? body.locationId.trim() : "";
+-  let connectionQuery = supabase
+-    .from("ghl_locations")
+-    .select(
+-      "access_token, company_id, created_at, connection_status, is_bulk_installation, location_access_token, location_refresh_token, location_token_expires_at, location_id, parent_connection_id, selected_at, selected_location_id, user_type",
+-    )
+-    .or("connection_status.eq.connected,connection_status.is.null")
+-    .not("location_id", "like", "company:%");
+-
+-  if (activeLocationId) {
+-    connectionQuery = connectionQuery.eq("location_id", activeLocationId);
+-  }
+-
+-  const { data: connections, error: connectionError } = await connectionQuery
+-    .order("selected_at", { ascending: false, nullsFirst: false })
+-    .order("created_at", { ascending: false })
+-    .limit(1);
++  let activeLocation;
+ 
+-  if (connectionError) {
+-    console.error("DoorScale sync connection lookup failed:", connectionError);
+-    response.status(500).json({
+-      ok: false,
+-      message: "Unable to sync DoorScale data.",
+-    });
+-    return;
+-  }
+-
+-  const connection = connections?.[0] as StoredConnection | undefined;
+-
+-  if (!connection) {
+-    response.status(404).json({
++  try {
++    activeLocation = await getActiveLocation(request, supabase, "/api/ghl/sync");
++  } catch (error) {
++    console.error("DoorScale sync active account failed:", error);
++    response.status(409).json({
+       ok: false,
+-      message: "DoorScale account is not connected.",
++      message: "Choose a DoorScale account before syncing.",
+     });
+     return;
+   }
+ 
+   console.log("DoorScale sync active account:", {
+-    activeLocationId: activeLocationId || null,
+-    connectionLocationId: connection.location_id,
++    activeLocationId: activeLocation.location_id,
++    connectionId: activeLocation.id,
+   });
+ 
++  const connection: StoredConnection = {
++    access_token: activeLocation.access_token,
++    location_id: activeLocation.location_id,
++    selected_location_id: activeLocation.location_id,
++    user_type: "PrivateIntegration",
++  };
++
+   let syncToken: string;
+   let selectedLocationId: string;
+   try {
+@@ -1364,6 +1353,11 @@ export default async function handler(
+       ok: false,
+       message: "Transaction Management System pipeline was not found.",
+     });
++    logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
++      documents: 0,
++      tasks: 0,
++      transactions: 0,
++    });
+     return;
+   }
+ 
+@@ -1568,6 +1562,11 @@ export default async function handler(
+       pipelineIdUsed,
+       skippedOpportunities,
+     });
++    logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
++      documents: syncedTransactionRows.length,
++      tasks: syncedTasks,
++      transactions: syncedTransactionRows.length,
++    });
+     return;
+   }
+ 
+@@ -1582,4 +1581,9 @@ export default async function handler(
+     pipelineIdUsed,
+     skippedOpportunities,
+   });
++  logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
++    documents: 0,
++    tasks: 0,
++    transactions: 0,
++  });
+ }
+diff --git a/api/ghl/tasks/create.ts b/api/ghl/tasks/create.ts
+index 1973e22..6c3c40b 100644
+--- a/api/ghl/tasks/create.ts
++++ b/api/ghl/tasks/create.ts
+@@ -1,14 +1,14 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
++import {
++  getActiveLocation,
++  getRequestedLocationId,
++  logRouteDataCounts,
++} from "../_active-location";
+ 
+ const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
+ const API_VERSION = "2021-07-28";
+ 
+-type ConnectedAccount = {
+-  access_token: string;
+-  location_id: string;
+-};
+-
+ type TransactionRow = {
+   contact_id: string | null;
+   ghl_opportunity_id: string | null;
+@@ -43,28 +43,6 @@ function getDueDateTime(body: CreateTaskBody) {
+   return body.dueDateTime || body.dueDate || null;
+ }
+ 
+-async function getConnectedAccount(
+-  supabase: ReturnType<typeof createClient>,
+-  locationId: string,
+-) {
+-  const { data, error } = await supabase
+-    .from("ghl_locations")
+-    .select("access_token, location_id")
+-    .or("connection_status.eq.connected,connection_status.is.null")
+-    .not("location_id", "like", "company:%")
+-    .eq("location_id", locationId)
+-    .order("selected_at", { ascending: false, nullsFirst: false })
+-    .order("created_at", { ascending: false })
+-    .limit(1)
+-    .maybeSingle();
+-
+-  if (error) {
+-    throw error;
+-  }
+-
+-  return data as ConnectedAccount | null;
+-}
+-
+ export default async function handler(
+   request: VercelRequest,
+   response: VercelResponse,
+@@ -87,7 +65,9 @@ export default async function handler(
+ 
+   const body = request.body as CreateTaskBody;
+ 
+-  if (!body.title || !body.transactionId || !body.locationId) {
++  const activeLocationId = getRequestedLocationId(request);
++
++  if (!body.title || !body.transactionId || !activeLocationId) {
+     response.status(400).json({ ok: false, message: "Task details are missing." });
+     return;
+   }
+@@ -100,7 +80,7 @@ export default async function handler(
+     .from("transactions")
+     .select("location_id, contact_id, ghl_opportunity_id")
+     .eq("id", body.transactionId)
+-    .eq("location_id", body.locationId)
++    .eq("location_id", activeLocationId)
+     .maybeSingle();
+ 
+   if (transactionError || !transaction) {
+@@ -126,11 +106,11 @@ export default async function handler(
+   let writeBackFailed = false;
+ 
+   try {
+-    const connectedAccount = await getConnectedAccount(supabase, body.locationId);
+-
+-    if (!connectedAccount?.access_token) {
+-      throw new Error("DoorScale account is not connected.");
+-    }
++    const connectedAccount = await getActiveLocation(
++      request,
++      supabase,
++      "/api/ghl/tasks/create",
++    );
+ 
+     if (connectedAccount.location_id !== transactionRow.location_id) {
+       throw new Error("DoorScale account does not match this transaction.");
+@@ -187,7 +167,7 @@ export default async function handler(
+         .from("tasks")
+         .update(taskRow)
+         .eq("id", body.taskId)
+-        .eq("location_id", body.locationId)
++        .eq("location_id", activeLocationId)
+         .select("id")
+         .single()
+     : supabase.from("tasks").insert(taskRow).select("id").single();
+@@ -206,4 +186,7 @@ export default async function handler(
+       : "Task saved.",
+     taskId: savedTask?.id,
+   });
++  logRouteDataCounts("/api/ghl/tasks/create", activeLocationId, {
++    tasks: savedTask ? 1 : 0,
++  });
+ }
+diff --git a/api/ghl/tasks/update.ts b/api/ghl/tasks/update.ts
+index 911a718..c111508 100644
+--- a/api/ghl/tasks/update.ts
++++ b/api/ghl/tasks/update.ts
+@@ -1,14 +1,14 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
++import {
++  getActiveLocation,
++  getRequestedLocationId,
++  logRouteDataCounts,
++} from "../_active-location";
+ 
+ const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
+ const API_VERSION = "2021-07-28";
+ 
+-type ConnectedAccount = {
+-  access_token: string;
+-  location_id: string;
+-};
+-
+ type TaskRow = {
+   assigned_to: string | null;
+   due_date: string | null;
+@@ -29,28 +29,6 @@ type UpdateTaskBody = {
+   title?: string;
+ };
+ 
+-async function getConnectedAccount(
+-  supabase: ReturnType<typeof createClient>,
+-  locationId: string,
+-) {
+-  const { data, error } = await supabase
+-    .from("ghl_locations")
+-    .select("access_token, location_id")
+-    .or("connection_status.eq.connected,connection_status.is.null")
+-    .not("location_id", "like", "company:%")
+-    .eq("location_id", locationId)
+-    .order("selected_at", { ascending: false, nullsFirst: false })
+-    .order("created_at", { ascending: false })
+-    .limit(1)
+-    .maybeSingle();
+-
+-  if (error) {
+-    throw error;
+-  }
+-
+-  return data as ConnectedAccount | null;
+-}
+-
+ function buildLocalUpdate(body: UpdateTaskBody) {
+   return {
+     ...(body.assignedTo !== undefined ? { assigned_to: body.assignedTo } : {}),
+@@ -105,7 +83,9 @@ export default async function handler(
+ 
+   const body = request.body as UpdateTaskBody;
+ 
+-  if (!body.taskId || !body.locationId) {
++  const activeLocationId = getRequestedLocationId(request);
++
++  if (!body.taskId || !activeLocationId) {
+     response.status(400).json({ ok: false, message: "Task details are missing." });
+     return;
+   }
+@@ -118,7 +98,7 @@ export default async function handler(
+     .from("tasks")
+     .select("assigned_to, due_date, due_datetime, ghl_task_id, location_id, status, title")
+     .eq("id", body.taskId)
+-    .eq("location_id", body.locationId)
++    .eq("location_id", activeLocationId)
+     .maybeSingle();
+ 
+   if (taskError || !currentTask) {
+@@ -131,11 +111,11 @@ export default async function handler(
+ 
+   if (task.ghl_task_id) {
+     try {
+-      const connectedAccount = await getConnectedAccount(supabase, body.locationId);
+-
+-      if (!connectedAccount?.access_token) {
+-        throw new Error("DoorScale account is not connected.");
+-      }
++      const connectedAccount = await getActiveLocation(
++        request,
++        supabase,
++        "/api/ghl/tasks/update",
++      );
+ 
+       if (connectedAccount.location_id !== task.location_id) {
+         throw new Error("DoorScale account does not match this task.");
+@@ -176,7 +156,7 @@ export default async function handler(
+       ...getSyncFields(writeBackFailed),
+     })
+     .eq("id", body.taskId)
+-    .eq("location_id", body.locationId);
++    .eq("location_id", activeLocationId);
+ 
+   if (updateError) {
+     console.error("Local task update failed:", updateError);
+@@ -190,4 +170,7 @@ export default async function handler(
+       ? "Task saved locally. DoorScale sync will retry later."
+       : "Task saved.",
+   });
++  logRouteDataCounts("/api/ghl/tasks/update", activeLocationId, {
++    tasks: 1,
++  });
+ }
+diff --git a/api/ghl/transactions/create.ts b/api/ghl/transactions/create.ts
+index 5978c26..1cfbf08 100644
+--- a/api/ghl/transactions/create.ts
++++ b/api/ghl/transactions/create.ts
+@@ -1,16 +1,16 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
++import {
++  getActiveLocation,
++  getRequestedLocationId,
++  logRouteDataCounts,
++} from "../_active-location";
+ 
+ const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
+ const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
+ const API_VERSION = "2021-07-28";
+ const PIPELINE_NAME = "Transaction Management System";
+ 
+-type ConnectedAccount = {
+-  access_token: string;
+-  location_id: string;
+-};
+-
+ type PipelineStage = {
+   id?: string;
+   _id?: string;
+@@ -91,31 +91,6 @@ function mapStatus(status?: string) {
+   }
+ }
+ 
+-async function getConnectedAccount(
+-  supabase: ReturnType<typeof createClient>,
+-  locationId?: string,
+-) {
+-  let query = supabase
+-    .from("ghl_locations")
+-    .select("access_token, location_id")
+-    .or("connection_status.eq.connected,connection_status.is.null")
+-    .not("location_id", "like", "company:%");
+-
+-  if (locationId) {
+-    query = query.eq("location_id", locationId);
+-  }
+-
+-  const { data, error } = await query
+-    .order("selected_at", { ascending: false, nullsFirst: false })
+-    .order("created_at", { ascending: false })
+-    .limit(1)
+-    .maybeSingle();
+-
+-  if (error) throw error;
+-
+-  return data as ConnectedAccount | null;
+-}
+-
+ async function getPipelineConfig(accessToken: string, locationId: string) {
+   const pipelinesUrl = new URL(PIPELINES_URL);
+   pipelinesUrl.searchParams.set("locationId", locationId);
+@@ -178,7 +153,9 @@ export default async function handler(
+     return;
+   }
+ 
+-  if (!body.locationId) {
++  const activeLocationId = getRequestedLocationId(request);
++
++  if (!activeLocationId) {
+     response.status(400).json({ ok: false, message: "DoorScale account is required." });
+     return;
+   }
+@@ -191,10 +168,14 @@ export default async function handler(
+   let writeBackFailed = false;
+ 
+   try {
+-    const connectedAccount = await getConnectedAccount(supabase, body.locationId);
++    const connectedAccount = await getActiveLocation(
++      request,
++      supabase,
++      "/api/ghl/transactions/create",
++    );
+ 
+-    if (!connectedAccount?.access_token) {
+-      throw new Error("DoorScale account is not connected.");
++    if (connectedAccount.location_id !== activeLocationId) {
++      throw new Error("DoorScale account does not match this transaction.");
+     }
+ 
+     linkedLocationId = connectedAccount.location_id;
+@@ -249,7 +230,7 @@ export default async function handler(
+     ghl_location_id: linkedLocationId,
+     ghl_opportunity_id: opportunityId ?? null,
+     inspection_date: body.inspectionDate || null,
+-    location_id: body.locationId,
++    location_id: activeLocationId,
+     property_address: body.propertyAddress,
+     seller_name: body.sellerName || null,
+     stage: body.stage,
+@@ -266,7 +247,7 @@ export default async function handler(
+         .from("transactions")
+         .update(transactionRow)
+         .eq("id", body.transactionId)
+-        .eq("location_id", body.locationId)
++        .eq("location_id", activeLocationId)
+         .select("id")
+         .single()
+     : supabase.from("transactions").insert(transactionRow).select("id").single();
+@@ -285,4 +266,7 @@ export default async function handler(
+       : "Transaction saved.",
+     transactionId: savedTransaction?.id,
+   });
++  logRouteDataCounts("/api/ghl/transactions/create", activeLocationId, {
++    transactions: savedTransaction ? 1 : 0,
++  });
+ }
+diff --git a/api/ghl/transactions/update.ts b/api/ghl/transactions/update.ts
+index c40251e..606d1eb 100644
+--- a/api/ghl/transactions/update.ts
++++ b/api/ghl/transactions/update.ts
+@@ -1,16 +1,16 @@
+ import { createClient } from "@supabase/supabase-js";
+ import type { VercelRequest, VercelResponse } from "@vercel/node";
++import {
++  getActiveLocation,
++  getRequestedLocationId,
++  logRouteDataCounts,
++} from "../_active-location";
+ 
+ const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities";
+ const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
+ const API_VERSION = "2021-07-28";
+ const PIPELINE_NAME = "Transaction Management System";
+ 
+-type ConnectedAccount = {
+-  access_token: string;
+-  location_id: string;
+-};
+-
+ type PipelineStage = {
+   id?: string;
+   _id?: string;
+@@ -86,26 +86,6 @@ function mapStatus(status?: string) {
+   }
+ }
+ 
+-async function getConnectedAccount(
+-  supabase: ReturnType<typeof createClient>,
+-  locationId: string,
+-) {
+-  const { data, error } = await supabase
+-    .from("ghl_locations")
+-    .select("access_token, location_id")
+-    .or("connection_status.eq.connected,connection_status.is.null")
+-    .not("location_id", "like", "company:%")
+-    .eq("location_id", locationId)
+-    .order("selected_at", { ascending: false, nullsFirst: false })
+-    .order("created_at", { ascending: false })
+-    .limit(1)
+-    .maybeSingle();
+-
+-  if (error) throw error;
+-
+-  return data as ConnectedAccount | null;
+-}
+-
+ async function getPipelineConfig(accessToken: string, locationId: string) {
+   const pipelinesUrl = new URL(PIPELINES_URL);
+   pipelinesUrl.searchParams.set("locationId", locationId);
+@@ -207,7 +187,9 @@ export default async function handler(
+ 
+   const body = request.body as UpdateTransactionBody;
+ 
+-  if (!body.transactionId || !body.locationId) {
++  const activeLocationId = getRequestedLocationId(request);
++
++  if (!body.transactionId || !activeLocationId) {
+     response.status(400).json({ ok: false, message: "Transaction details are missing." });
+     return;
+   }
+@@ -219,7 +201,7 @@ export default async function handler(
+     .from("transactions")
+     .select("ghl_opportunity_id, location_id")
+     .eq("id", body.transactionId)
+-    .eq("location_id", body.locationId)
++    .eq("location_id", activeLocationId)
+     .maybeSingle();
+ 
+   if (transactionError || !transaction) {
+@@ -239,11 +221,11 @@ export default async function handler(
+     });
+   } else {
+     try {
+-      const connectedAccount = await getConnectedAccount(supabase, body.locationId);
+-
+-      if (!connectedAccount?.access_token) {
+-        throw new Error("DoorScale account is not connected.");
+-      }
++      const connectedAccount = await getActiveLocation(
++        request,
++        supabase,
++        "/api/ghl/transactions/update",
++      );
+ 
+       if (connectedAccount.location_id !== transactionRow.location_id) {
+         throw new Error("DoorScale account does not match this transaction.");
+@@ -323,7 +305,7 @@ export default async function handler(
+       ...getSyncFields(body, writeBackFailed),
+     })
+     .eq("id", body.transactionId)
+-    .eq("location_id", body.locationId);
++    .eq("location_id", activeLocationId);
+ 
+   if (updateError) {
+     console.error("Local transaction update failed:", updateError);
+@@ -335,4 +317,7 @@ export default async function handler(
+     ok: !writeBackFailed,
+     message: getLocalSaveMessage(body, writeBackFailed),
+   });
++  logRouteDataCounts("/api/ghl/transactions/update", activeLocationId, {
++    transactions: 1,
++  });
+ }
+diff --git a/src/components/AppSidebar.tsx b/src/components/AppSidebar.tsx
+index be56b4a..2283ccb 100644
+--- a/src/components/AppSidebar.tsx
++++ b/src/components/AppSidebar.tsx
+@@ -10,6 +10,7 @@ import {
+ import { useEffect, useState } from "react";
+ import { NavLink } from "@/components/NavLink";
+ import {
++  getDoorScaleLocationHeaders,
+   getStoredActiveLocationId,
+   setStoredActiveLocationId,
+ } from "@/lib/active-location";
+@@ -70,9 +71,10 @@ export function AppSidebar() {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(),
+         },
+         body: JSON.stringify({
+-          locationId: getStoredActiveLocationId(),
++          active_location_id: getStoredActiveLocationId(),
+         }),
+       });
+       const result = (await response.json().catch(() => ({}))) as {
+diff --git a/src/hooks/use-crm-data.ts b/src/hooks/use-crm-data.ts
+index bcb994a..94e070a 100644
+--- a/src/hooks/use-crm-data.ts
++++ b/src/hooks/use-crm-data.ts
+@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
+ import { addDays, subDays } from "date-fns";
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+ import {
++  getDoorScaleLocationHeaders,
+   getStoredActiveLocationId,
+   setStoredActiveLocationId,
+   subscribeToActiveLocationChange,
+@@ -254,6 +255,7 @@ type SupabaseTransactionDocument = {
+ 
+ type SupabaseTaskTemplate = {
+   id: string;
++  location_id?: string | null;
+   title: string | null;
+   days_offset: number | null;
+   assigned_role: string | null;
+@@ -262,6 +264,7 @@ type SupabaseTaskTemplate = {
+ 
+ type SupabaseDocumentTemplate = {
+   id: string;
++  location_id?: string | null;
+   document_type: string | null;
+   document_name: string | null;
+   sort_order: number | null;
+@@ -668,6 +671,14 @@ async function fetchCrmData(
+     throw new Error("Unable to load transaction data.");
+   }
+ 
++  console.log("DoorScale dashboard data loaded:", {
++    activeLocationId,
++    documents: documentsResult.data?.length ?? 0,
++    tables: ["transactions", "tasks", "transaction_documents"],
++    tasks: tasksResult.data?.length ?? 0,
++    transactions: transactionsResult.data?.length ?? 0,
++  });
++
+   return mapSupabaseData(
+     transactionsResult.data ?? [],
+     tasksResult.data ?? [],
+@@ -684,8 +695,8 @@ async function generateChecklistTasks(
+ ) {
+   const { data: templates, error: templateError } = await client
+     .from("task_templates")
+-    .select("id, title, days_offset, assigned_role, sort_order")
+-    .eq("location_id", activeLocationId)
++    .select("id, location_id, title, days_offset, assigned_role, sort_order")
++    .in("location_id", [activeLocationId, "demo-location", "global"])
+     .eq("transaction_type", transactionType)
+     .eq("stage", stage)
+     .order("sort_order", { ascending: true });
+@@ -694,7 +705,18 @@ async function generateChecklistTasks(
+     throw new Error("Unable to generate checklist tasks.");
+   }
+ 
+-  const taskTemplates = (templates ?? []) as SupabaseTaskTemplate[];
++  const templateRows = (templates ?? []) as Array<
++    SupabaseTaskTemplate & { location_id?: string | null }
++  >;
++  const locationSpecificTemplates = templateRows.filter(
++    (template) => template.location_id === activeLocationId,
++  );
++  const taskTemplates =
++    locationSpecificTemplates.length > 0
++      ? locationSpecificTemplates
++      : templateRows.filter((template) =>
++          ["demo-location", "global"].includes(template.location_id ?? ""),
++        );
+ 
+   if (!taskTemplates.length) return;
+ 
+@@ -755,8 +777,8 @@ async function generateDocumentChecklist(
+ ) {
+   const { data: templates, error: templateError } = await client
+     .from("document_templates")
+-    .select("id, document_type, document_name, sort_order")
+-    .eq("location_id", activeLocationId)
++    .select("id, location_id, document_type, document_name, sort_order")
++    .in("location_id", [activeLocationId, "demo-location", "global"])
+     .eq("transaction_type", transactionType)
+     .eq("stage", stage)
+     .order("sort_order", { ascending: true });
+@@ -765,7 +787,16 @@ async function generateDocumentChecklist(
+     throw new Error("Unable to generate document checklist.");
+   }
+ 
+-  const documentTemplates = (templates ?? []) as SupabaseDocumentTemplate[];
++  const templateRows = (templates ?? []) as SupabaseDocumentTemplate[];
++  const locationSpecificTemplates = templateRows.filter(
++    (template) => template.location_id === activeLocationId,
++  );
++  const documentTemplates =
++    locationSpecificTemplates.length > 0
++      ? locationSpecificTemplates
++      : templateRows.filter((template) =>
++          ["demo-location", "global"].includes(template.location_id ?? ""),
++        );
+ 
+   if (!documentTemplates.length) return;
+ 
+@@ -795,7 +826,7 @@ async function generateDocumentChecklist(
+       transaction_id: transactionId,
+       document_type: template.document_type,
+       document_name: template.document_name || template.document_type,
+-      status: "Needed",
++      status: "needed",
+     }));
+ 
+   if (!documentRows.length) return;
+@@ -971,9 +1002,11 @@ export function useCrmData() {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+         body: JSON.stringify({
+           ...input,
++          active_location_id: locationId,
+           locationId,
+           status: "active",
+         }),
+@@ -1043,8 +1076,10 @@ export function useCrmData() {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+         body: JSON.stringify({
++          active_location_id: locationId,
+           locationId,
+           stage: input.stage,
+           transactionId: input.transactionId,
+@@ -1150,8 +1185,9 @@ export function useCrmData() {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+-        body: JSON.stringify({ ...input, locationId }),
++        body: JSON.stringify({ ...input, active_location_id: locationId, locationId }),
+       });
+       const result = await parseTransactionWriteResponse(response);
+ 
+@@ -1189,19 +1225,27 @@ export function useCrmData() {
+         return;
+       }
+ 
++      const locationId = activeLocationId || (await getActiveLocationId());
++
++      if (!locationId) {
++        throw new Error("Connect DoorScale to save task data.");
++      }
++
+       const response = await fetch("/api/ghl/tasks/create", {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+         body: JSON.stringify({
++          active_location_id: locationId,
+           assignedTo: input.assignedTo,
+           dueDate: input.dueDate || null,
+           dueDateTime,
+           status: "pending",
+           title: input.title,
+           transactionId: input.transactionId,
+-          locationId: activeLocationId || (await getActiveLocationId()),
++          locationId,
+         }),
+       });
+       const result = await parseTaskWriteResponse(response);
+@@ -1229,13 +1273,21 @@ export function useCrmData() {
+         return;
+       }
+ 
++      const locationId = activeLocationId || (await getActiveLocationId());
++
++      if (!locationId) {
++        throw new Error("Connect DoorScale to save task data.");
++      }
++
+       const response = await fetch("/api/ghl/tasks/update", {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+         body: JSON.stringify({
+-          locationId: activeLocationId || (await getActiveLocationId()),
++          active_location_id: locationId,
++          locationId,
+           status: "completed",
+           taskId,
+         }),
+@@ -1273,15 +1325,23 @@ export function useCrmData() {
+         return;
+       }
+ 
++      const locationId = activeLocationId || (await getActiveLocationId());
++
++      if (!locationId) {
++        throw new Error("Connect DoorScale to save task data.");
++      }
++
+       const response = await fetch("/api/ghl/tasks/update", {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+         body: JSON.stringify({
++          active_location_id: locationId,
+           dueDate: dueDate || null,
+           dueDateTime,
+-          locationId: activeLocationId || (await getActiveLocationId()),
++          locationId,
+           taskId,
+         }),
+       });
+@@ -1312,12 +1372,20 @@ export function useCrmData() {
+       const endpoint = transaction.ghlOpportunityId
+         ? "/api/ghl/transactions/update"
+         : "/api/ghl/transactions/create";
++      const locationId = activeLocationId || (await getActiveLocationId());
++
++      if (!locationId) {
++        throw new Error("Connect DoorScale to save transaction data.");
++      }
++
+       const response = await fetch(endpoint, {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+         body: JSON.stringify({
++          active_location_id: locationId,
+           buyerName: fields.buyerName,
+           closingDate: fields.closingDate,
+           commission: String(transaction.value || 0),
+@@ -1326,7 +1394,7 @@ export function useCrmData() {
+           sellerName: fields.sellerName,
+           stage: transaction.stage,
+           status: transaction.status,
+-          locationId: activeLocationId || (await getActiveLocationId()),
++          locationId,
+           transactionId,
+           transactionType: fields.transactionType,
+         }),
+@@ -1353,12 +1421,20 @@ export function useCrmData() {
+       const endpoint = task.ghlTaskId
+         ? "/api/ghl/tasks/update"
+         : "/api/ghl/tasks/create";
++      const locationId = activeLocationId || (await getActiveLocationId());
++
++      if (!locationId) {
++        throw new Error("Connect DoorScale to save task data.");
++      }
++
+       const response = await fetch(endpoint, {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
++          ...getDoorScaleLocationHeaders(locationId),
+         },
+         body: JSON.stringify({
++          active_location_id: locationId,
+           assignedTo: task.assignedTo,
+           dueDate: task.dueDate || null,
+           dueDateTime: task.dueDateTime || null,
+@@ -1366,7 +1442,7 @@ export function useCrmData() {
+           taskId,
+           title: task.title,
+           transactionId: task.transactionId,
+-          locationId: activeLocationId || (await getActiveLocationId()),
++          locationId,
+         }),
+       });
+       const result = await parseTaskWriteResponse(response);
+diff --git a/src/lib/active-location.ts b/src/lib/active-location.ts
+index 753194b..f065880 100644
+--- a/src/lib/active-location.ts
++++ b/src/lib/active-location.ts
+@@ -1,15 +1,27 @@
+-const ACTIVE_LOCATION_KEY = "doorscale.activeLocationId";
++const ACTIVE_LOCATION_KEY = "active_location_id";
++const LEGACY_ACTIVE_LOCATION_KEY = "doorscale.activeLocationId";
+ const ACTIVE_LOCATION_EVENT = "doorscale-active-location-change";
+ 
+ export function getStoredActiveLocationId() {
+-  return window.localStorage.getItem(ACTIVE_LOCATION_KEY) || "";
++  return (
++    window.localStorage.getItem(ACTIVE_LOCATION_KEY) ||
++    window.localStorage.getItem(LEGACY_ACTIVE_LOCATION_KEY) ||
++    ""
++  );
+ }
+ 
+ export function setStoredActiveLocationId(locationId: string) {
+   window.localStorage.setItem(ACTIVE_LOCATION_KEY, locationId);
++  window.localStorage.setItem(LEGACY_ACTIVE_LOCATION_KEY, locationId);
+   window.dispatchEvent(new Event(ACTIVE_LOCATION_EVENT));
+ }
+ 
++export function getDoorScaleLocationHeaders(
++  locationId = getStoredActiveLocationId(),
++): Record<string, string> {
++  return locationId ? { "x-doorscale-location-id": locationId } : {};
++}
++
+ export function subscribeToActiveLocationChange(callback: () => void) {
+   window.addEventListener(ACTIVE_LOCATION_EVENT, callback);
+   window.addEventListener("storage", callback);

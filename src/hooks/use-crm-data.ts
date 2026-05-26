@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { addDays, subDays } from "date-fns";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  getDoorScaleLocationHeaders,
   getStoredActiveLocationId,
   setStoredActiveLocationId,
   subscribeToActiveLocationChange,
@@ -254,6 +255,7 @@ type SupabaseTransactionDocument = {
 
 type SupabaseTaskTemplate = {
   id: string;
+  location_id?: string | null;
   title: string | null;
   days_offset: number | null;
   assigned_role: string | null;
@@ -262,6 +264,7 @@ type SupabaseTaskTemplate = {
 
 type SupabaseDocumentTemplate = {
   id: string;
+  location_id?: string | null;
   document_type: string | null;
   document_name: string | null;
   sort_order: number | null;
@@ -668,6 +671,14 @@ async function fetchCrmData(
     throw new Error("Unable to load transaction data.");
   }
 
+  console.log("DoorScale dashboard data loaded:", {
+    activeLocationId,
+    documents: documentsResult.data?.length ?? 0,
+    tables: ["transactions", "tasks", "transaction_documents"],
+    tasks: tasksResult.data?.length ?? 0,
+    transactions: transactionsResult.data?.length ?? 0,
+  });
+
   return mapSupabaseData(
     transactionsResult.data ?? [],
     tasksResult.data ?? [],
@@ -684,8 +695,8 @@ async function generateChecklistTasks(
 ) {
   const { data: templates, error: templateError } = await client
     .from("task_templates")
-    .select("id, title, days_offset, assigned_role, sort_order")
-    .eq("location_id", activeLocationId)
+    .select("id, location_id, title, days_offset, assigned_role, sort_order")
+    .in("location_id", [activeLocationId, "demo-location", "global"])
     .eq("transaction_type", transactionType)
     .eq("stage", stage)
     .order("sort_order", { ascending: true });
@@ -694,7 +705,18 @@ async function generateChecklistTasks(
     throw new Error("Unable to generate checklist tasks.");
   }
 
-  const taskTemplates = (templates ?? []) as SupabaseTaskTemplate[];
+  const templateRows = (templates ?? []) as Array<
+    SupabaseTaskTemplate & { location_id?: string | null }
+  >;
+  const locationSpecificTemplates = templateRows.filter(
+    (template) => template.location_id === activeLocationId,
+  );
+  const taskTemplates =
+    locationSpecificTemplates.length > 0
+      ? locationSpecificTemplates
+      : templateRows.filter((template) =>
+          ["demo-location", "global"].includes(template.location_id ?? ""),
+        );
 
   if (!taskTemplates.length) return;
 
@@ -755,8 +777,8 @@ async function generateDocumentChecklist(
 ) {
   const { data: templates, error: templateError } = await client
     .from("document_templates")
-    .select("id, document_type, document_name, sort_order")
-    .eq("location_id", activeLocationId)
+    .select("id, location_id, document_type, document_name, sort_order")
+    .in("location_id", [activeLocationId, "demo-location", "global"])
     .eq("transaction_type", transactionType)
     .eq("stage", stage)
     .order("sort_order", { ascending: true });
@@ -765,7 +787,16 @@ async function generateDocumentChecklist(
     throw new Error("Unable to generate document checklist.");
   }
 
-  const documentTemplates = (templates ?? []) as SupabaseDocumentTemplate[];
+  const templateRows = (templates ?? []) as SupabaseDocumentTemplate[];
+  const locationSpecificTemplates = templateRows.filter(
+    (template) => template.location_id === activeLocationId,
+  );
+  const documentTemplates =
+    locationSpecificTemplates.length > 0
+      ? locationSpecificTemplates
+      : templateRows.filter((template) =>
+          ["demo-location", "global"].includes(template.location_id ?? ""),
+        );
 
   if (!documentTemplates.length) return;
 
@@ -795,7 +826,7 @@ async function generateDocumentChecklist(
       transaction_id: transactionId,
       document_type: template.document_type,
       document_name: template.document_name || template.document_type,
-      status: "Needed",
+      status: "needed",
     }));
 
   if (!documentRows.length) return;
@@ -971,9 +1002,11 @@ export function useCrmData() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
           ...input,
+          active_location_id: locationId,
           locationId,
           status: "active",
         }),
@@ -1043,8 +1076,10 @@ export function useCrmData() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          active_location_id: locationId,
           locationId,
           stage: input.stage,
           transactionId: input.transactionId,
@@ -1150,8 +1185,9 @@ export function useCrmData() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
-        body: JSON.stringify({ ...input, locationId }),
+        body: JSON.stringify({ ...input, active_location_id: locationId, locationId }),
       });
       const result = await parseTransactionWriteResponse(response);
 
@@ -1189,19 +1225,27 @@ export function useCrmData() {
         return;
       }
 
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save task data.");
+      }
+
       const response = await fetch("/api/ghl/tasks/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          active_location_id: locationId,
           assignedTo: input.assignedTo,
           dueDate: input.dueDate || null,
           dueDateTime,
           status: "pending",
           title: input.title,
           transactionId: input.transactionId,
-          locationId: activeLocationId || (await getActiveLocationId()),
+          locationId,
         }),
       });
       const result = await parseTaskWriteResponse(response);
@@ -1229,13 +1273,21 @@ export function useCrmData() {
         return;
       }
 
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save task data.");
+      }
+
       const response = await fetch("/api/ghl/tasks/update", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
-          locationId: activeLocationId || (await getActiveLocationId()),
+          active_location_id: locationId,
+          locationId,
           status: "completed",
           taskId,
         }),
@@ -1273,15 +1325,23 @@ export function useCrmData() {
         return;
       }
 
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save task data.");
+      }
+
       const response = await fetch("/api/ghl/tasks/update", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          active_location_id: locationId,
           dueDate: dueDate || null,
           dueDateTime,
-          locationId: activeLocationId || (await getActiveLocationId()),
+          locationId,
           taskId,
         }),
       });
@@ -1312,12 +1372,20 @@ export function useCrmData() {
       const endpoint = transaction.ghlOpportunityId
         ? "/api/ghl/transactions/update"
         : "/api/ghl/transactions/create";
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save transaction data.");
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          active_location_id: locationId,
           buyerName: fields.buyerName,
           closingDate: fields.closingDate,
           commission: String(transaction.value || 0),
@@ -1326,7 +1394,7 @@ export function useCrmData() {
           sellerName: fields.sellerName,
           stage: transaction.stage,
           status: transaction.status,
-          locationId: activeLocationId || (await getActiveLocationId()),
+          locationId,
           transactionId,
           transactionType: fields.transactionType,
         }),
@@ -1353,12 +1421,20 @@ export function useCrmData() {
       const endpoint = task.ghlTaskId
         ? "/api/ghl/tasks/update"
         : "/api/ghl/tasks/create";
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Connect DoorScale to save task data.");
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          active_location_id: locationId,
           assignedTo: task.assignedTo,
           dueDate: task.dueDate || null,
           dueDateTime: task.dueDateTime || null,
@@ -1366,7 +1442,7 @@ export function useCrmData() {
           taskId,
           title: task.title,
           transactionId: task.transactionId,
-          locationId: activeLocationId || (await getActiveLocationId()),
+          locationId,
         }),
       });
       const result = await parseTaskWriteResponse(response);
