@@ -1238,12 +1238,34 @@ export default async function handler(
     syncToken,
     selectedLocationId,
   );
+  const pipelineUsed = findTransactionManagementSystemPipeline(pipelines);
+
+  if (!pipelineUsed) {
+    response.status(200).json({
+      ok: false,
+      message: "Transaction Management System pipeline was not found.",
+    });
+    return;
+  }
+
+  const pipelineIdUsed = getPipelineId(pipelineUsed);
+  const pipelineNameUsed = getPipelineName(pipelineUsed);
+
+  if (!pipelineIdUsed) {
+    response.status(200).json({
+      ok: false,
+      message: "Transaction Management System pipeline was not found.",
+    });
+    return;
+  }
+
   const fieldMap = await buildFieldMap(
     syncToken,
     selectedLocationId,
   );
   const opportunitiesUrl = new URL(OPPORTUNITIES_URL);
   opportunitiesUrl.searchParams.set("location_id", selectedLocationId);
+  opportunitiesUrl.searchParams.set("pipeline_id", pipelineIdUsed);
 
   console.log("DoorScale sync endpoint called:", opportunitiesUrl.toString());
 
@@ -1277,25 +1299,12 @@ export default async function handler(
   const opportunities = getOpportunities(opportunitiesPayload).filter(
     (opportunity) => Boolean(opportunity.id),
   );
-  const pipelineUsed = findTransactionManagementSystemPipeline(pipelines);
-
-  if (!pipelineUsed) {
-    response.status(200).json({
-      ok: false,
-      message: "Transaction Management System pipeline was not found.",
-    });
-    return;
-  }
-
-  const pipelineIdUsed = pipelineUsed ? getPipelineId(pipelineUsed) : undefined;
-  const pipelineNameUsed = pipelineUsed ? getPipelineName(pipelineUsed) : undefined;
   const stageMap = buildStageMap(pipelineUsed);
-  const syncableOpportunities = pipelineIdUsed
-    ? opportunities.filter(
-        (opportunity) => getOpportunityPipelineId(opportunity) === pipelineIdUsed,
-      )
-    : [];
+  const syncableOpportunities = opportunities.filter(
+    (opportunity) => getOpportunityPipelineId(opportunity) === pipelineIdUsed,
+  );
   const skippedOpportunities = opportunities.length - syncableOpportunities.length;
+  const opportunityCount = syncableOpportunities.length;
   const opportunityIds = syncableOpportunities
     .map((opportunity) => opportunity.id)
     .filter((id): id is string => Boolean(id));
@@ -1307,6 +1316,7 @@ export default async function handler(
       syncedTransactions: 0,
       syncedTasks: 0,
       skippedTasks: 0,
+      opportunityCount,
       pipelineNameUsed,
       pipelineIdUsed,
       skippedOpportunities,
@@ -1432,6 +1442,7 @@ export default async function handler(
       syncedTransactions: syncedTransactions?.length ?? 0,
       syncedTasks,
       skippedTasks,
+      opportunityCount,
       pipelineNameUsed,
       pipelineIdUsed,
       skippedOpportunities,
@@ -1445,6 +1456,7 @@ export default async function handler(
     syncedTransactions: 0,
     syncedTasks: 0,
     skippedTasks: 0,
+    opportunityCount,
     pipelineNameUsed,
     pipelineIdUsed,
     skippedOpportunities,
