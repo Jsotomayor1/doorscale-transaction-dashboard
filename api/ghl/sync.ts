@@ -325,6 +325,21 @@ async function getLocationAccessToken(
     ? connection.selected_location_id
     : connection.selected_location_id ?? connection.location_id;
 
+  if (connection.user_type === "PrivateIntegration") {
+    if (!connection.access_token || !selectedLocationId) {
+      throw new Error("location_token_unavailable");
+    }
+
+    console.log("DoorScale sync using private integration connection:", {
+      selected_location_id: selectedLocationId,
+    });
+
+    return {
+      accessToken: connection.access_token,
+      locationId: selectedLocationId,
+    };
+  }
+
   console.log("DoorScale sync selected_location_id:", selectedLocationId);
   console.log("DoorScale sync selected account token state:", {
     hasCompanyAccessToken: Boolean(connection.access_token),

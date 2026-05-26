@@ -2,7 +2,7 @@ import {
   BarChart3,
   CheckSquare,
   CircleDollarSign,
-  Link as LinkIcon,
+  KeyRound,
   Home,
   RefreshCw,
   Workflow,
@@ -12,7 +12,6 @@ import { NavLink } from "@/components/NavLink";
 
 export function AppSidebar() {
   const [isConnected, setIsConnected] = useState(false);
-  const [needsAccountChoice, setNeedsAccountChoice] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
@@ -25,17 +24,14 @@ export function AppSidebar() {
         const response = await fetch("/api/ghl/status");
         const status = (await response.json()) as {
           connected?: boolean;
-          needsLocationSelection?: boolean;
         };
 
         if (isMounted) {
           setIsConnected(Boolean(status.connected));
-          setNeedsAccountChoice(Boolean(status.needsLocationSelection));
         }
       } catch {
         if (isMounted) {
           setIsConnected(false);
-          setNeedsAccountChoice(false);
         }
       } finally {
         if (isMounted) {
@@ -54,13 +50,8 @@ export function AppSidebar() {
   async function handleConnectionClick() {
     setSyncMessage("");
 
-    if (needsAccountChoice) {
-      window.location.href = "/choose-account";
-      return;
-    }
-
     if (!isConnected) {
-      window.location.href = "/api/oauth/connect";
+      window.location.href = "/private-integration";
       return;
     }
 
@@ -94,9 +85,7 @@ export function AppSidebar() {
 
   const connectionLabel = isSyncing
     ? "Syncing..."
-    : needsAccountChoice
-      ? "Choose DoorScale Account"
-      : isConnected
+    : isConnected
       ? "Sync DoorScale Data"
       : "Connect DoorScale";
 
@@ -136,22 +125,9 @@ export function AppSidebar() {
           onClick={() => void handleConnectionClick()}
           type="button"
         >
-          {isConnected ? <RefreshCw size={16} /> : <LinkIcon size={16} />}
+          {isConnected ? <RefreshCw size={16} /> : <KeyRound size={16} />}
           {connectionLabel}
         </button>
-        {!isConnected && !needsAccountChoice ? (
-          <button
-            className="sidebar__connect sidebar__connect--secondary"
-            disabled={isCheckingStatus}
-            onClick={() => {
-              window.location.href = "/private-integration";
-            }}
-            type="button"
-          >
-            <LinkIcon size={16} />
-            Private Integration
-          </button>
-        ) : null}
         {syncMessage ? (
           <p className="sidebar__sync-message">{syncMessage}</p>
         ) : null}

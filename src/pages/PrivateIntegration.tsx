@@ -42,7 +42,7 @@ export default function PrivateIntegration() {
     setIsSaving(true);
 
     try {
-      const response = await fetch("/api/ghl/private-integration", {
+      const response = await fetch("/api/ghl/private-connect", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -59,6 +59,9 @@ export default function PrivateIntegration() {
 
       setForm(initialForm);
       setMessage(result.message || "DoorScale connection saved.");
+      window.setTimeout(() => {
+        window.location.href = "/";
+      }, 900);
     } catch (saveError) {
       setError(
         saveError instanceof Error
@@ -96,7 +99,7 @@ export default function PrivateIntegration() {
         <CardContent>
           <form className="private-integration-form" onSubmit={handleSubmit}>
             <label>
-              <span>DoorScale Account Name</span>
+              <span>Account Name</span>
               <input
                 onChange={(event) =>
                   updateField("accountName", event.target.value)
@@ -127,7 +130,7 @@ export default function PrivateIntegration() {
             <div className="modal__actions">
               <Button disabled={isSaving} type="submit">
                 <Save size={17} />
-                {isSaving ? "Saving..." : "Save Connection"}
+                {isSaving ? "Connecting..." : "Connect DoorScale"}
               </Button>
             </div>
           </form>

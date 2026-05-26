@@ -46,7 +46,7 @@ export default async function handler(
         available_locations: [],
         company_id: null,
         connection_status: "connected",
-        expires_at: new Date("2099-12-31T23:59:59.000Z").toISOString(),
+        expires_at: null,
         is_bulk_installation: false,
         location_access_token: null,
         location_id: locationId,
