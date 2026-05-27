@@ -376,6 +376,24 @@ type CrmDataState = {
   documents: TransactionDocument[];
 };
 
+export type DataLoadDebug = {
+  parsedDocumentCount: number;
+  parsedTaskCount: number;
+  parsedTransactionCount: number;
+  responseBodyPreview: string;
+  responseStatus: string;
+  routeCalled: string;
+};
+
+const initialLoadDebug: DataLoadDebug = {
+  parsedDocumentCount: 0,
+  parsedTaskCount: 0,
+  parsedTransactionCount: 0,
+  responseBodyPreview: "No load response yet.",
+  responseStatus: "Not loaded",
+  routeCalled: "local DoorScale data",
+};
+
 function normalizeDocumentStatusValue(status = "needed"): DocumentStatus {
   const normalizedStatus = status.trim().toLowerCase().replace(/\s+/g, "_");
 
@@ -750,7 +768,7 @@ async function getActiveLocationId() {
 async function fetchCrmData(
   client: SupabaseClient,
   activeLocationId: string,
-): Promise<CrmDataState> {
+): Promise<{ data: CrmDataState; debug: DataLoadDebug }> {
   const [transactionsResult, tasksResult, documentsResult] = await Promise.all([
     client
       .from("transactions")
@@ -775,13 +793,24 @@ async function fetchCrmData(
       .order("created_at", { ascending: false }),
   ]);
 
-  if (transactionsResult.error || tasksResult.error || documentsResult.error) {
+  if (transactionsResult.error) {
     console.error("DoorScale transaction query failed:", {
       transactionsError: transactionsResult.error,
       tasksError: tasksResult.error,
       documentsError: documentsResult.error,
     });
     throw new Error("Unable to load transaction data.");
+  }
+
+  if (tasksResult.error) {
+    console.warn("DoorScale tasks unavailable during load:", tasksResult.error);
+  }
+
+  if (documentsResult.error) {
+    console.warn(
+      "DoorScale documents unavailable during load:",
+      documentsResult.error,
+    );
   }
 
   console.log("DoorScale dashboard data loaded:", {
@@ -793,12 +822,26 @@ async function fetchCrmData(
   });
 
   const transactions = (transactionsResult.data ?? []) as SupabaseTransaction[];
-  let documents = (documentsResult.data ?? []) as SupabaseTransactionDocument[];
-  const createdDocumentRows = await ensureDocumentChecklists(
-    client,
-    activeLocationId,
-    transactions,
-  );
+  const tasks = tasksResult.error ? [] : (tasksResult.data ?? []);
+  let documents = documentsResult.error
+    ? []
+    : ((documentsResult.data ?? []) as SupabaseTransactionDocument[]);
+  let documentChecklistMessage = "";
+
+  let createdDocumentRows = false;
+  try {
+    createdDocumentRows = await ensureDocumentChecklists(
+      client,
+      activeLocationId,
+      transactions,
+    );
+  } catch (checklistError) {
+    console.warn("DoorScale document checklist generation skipped:", {
+      activeLocationId,
+      error: checklistError,
+    });
+    documentChecklistMessage = "Document checklist will finish preparing later.";
+  }
 
   if (createdDocumentRows) {
     const refreshedDocumentsResult = await client
@@ -814,18 +857,38 @@ async function fetchCrmData(
         activeLocationId,
         error: refreshedDocumentsResult.error,
       });
-      throw new Error("Unable to load transaction documents.");
+      documentChecklistMessage = "Document checklist will finish preparing later.";
+    } else {
+      documents =
+        (refreshedDocumentsResult.data ?? []) as SupabaseTransactionDocument[];
     }
-
-    documents =
-      (refreshedDocumentsResult.data ?? []) as SupabaseTransactionDocument[];
   }
 
-  return mapSupabaseData(
+  const mappedData = mapSupabaseData(
     transactions,
-    tasksResult.data ?? [],
+    tasks,
     documents,
   );
+  const debug: DataLoadDebug = {
+    parsedDocumentCount: mappedData.documents.length,
+    parsedTaskCount: mappedData.tasks.length,
+    parsedTransactionCount: mappedData.transactions.length,
+    responseBodyPreview: JSON.stringify({
+      documentsError: documentsResult.error ? "documents unavailable" : null,
+      documentChecklistMessage,
+      tasksError: tasksResult.error ? "tasks unavailable" : null,
+      transactions: transactions.length,
+      tasks: tasks.length,
+      documents: documents.length,
+    }).slice(0, 500),
+    responseStatus: "loaded",
+    routeCalled: `local DoorScale tables for ${activeLocationId}`,
+  };
+
+  return {
+    data: mappedData,
+    debug,
+  };
 }
 
 async function generateChecklistTasks(
@@ -1069,10 +1132,19 @@ export function useCrmData() {
   const [loading, setLoading] = useState(!isDemoMode());
   const [error, setError] = useState<string | null>(null);
   const [activeLocationId, setActiveLocationId] = useState("");
+  const [loadDebug, setLoadDebug] = useState<DataLoadDebug>(initialLoadDebug);
 
   const refreshData = useCallback(async () => {
     if (isDemoMode()) {
       setData(mapDemoData());
+      setLoadDebug({
+        parsedDocumentCount: 0,
+        parsedTaskCount: mapDemoData().tasks.length,
+        parsedTransactionCount: mapDemoData().transactions.length,
+        responseBodyPreview: "Demo data loaded.",
+        responseStatus: "loaded",
+        routeCalled: "demo DoorScale data",
+      });
       setLoading(false);
       setError(null);
       return;
@@ -1099,9 +1171,20 @@ export function useCrmData() {
       }
 
       setActiveLocationId(locationId);
-      setData(await fetchCrmData(client, locationId));
+      const result = await fetchCrmData(client, locationId);
+      setData(result.data);
+      setLoadDebug(result.debug);
     } catch (crmError) {
       console.error("DoorScale transaction data load failed:", crmError);
+      setLoadDebug({
+        parsedDocumentCount: 0,
+        parsedTaskCount: 0,
+        parsedTransactionCount: 0,
+        responseBodyPreview:
+          crmError instanceof Error ? crmError.message : "Load failed.",
+        responseStatus: "error",
+        routeCalled: "local DoorScale tables",
+      });
       setError("Unable to load transaction data.");
     } finally {
       setLoading(false);
@@ -1940,6 +2023,7 @@ export function useCrmData() {
       }),
       totalCommission,
       documentCounts,
+      loadDebug,
       stageCounts,
       loading,
       error,
@@ -1961,6 +2045,7 @@ export function useCrmData() {
     data,
     error,
     loading,
+    loadDebug,
     markTaskCompleted,
     refreshData,
     retryTaskSync,

@@ -10,7 +10,7 @@ import { useCRMData } from "@/hooks/use-crm-data";
 import { formatCurrency } from "@/lib/utils";
 
 export default function Commissions() {
-  const { activeTransactions, error, loading, totalCommission, transactions } =
+  const { activeTransactions, error, loadDebug, loading, totalCommission, transactions } =
     useCRMData();
 
   const closedCommission = transactions
@@ -29,6 +29,14 @@ export default function Commissions() {
           <p>Track projected, closed, and inactive commission totals.</p>
           {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
+          <div className="debug-panel">
+            <strong>Load debug</strong>
+            <span>route called: {loadDebug.routeCalled}</span>
+            <span>response status: {loadDebug.responseStatus}</span>
+            <span>response body preview: {loadDebug.responseBodyPreview}</span>
+            <span>parsed transactions: {loadDebug.parsedTransactionCount}</span>
+            <span>parsed documents: {loadDebug.parsedDocumentCount}</span>
+          </div>
         </div>
       </header>
 

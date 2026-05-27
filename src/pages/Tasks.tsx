@@ -10,6 +10,7 @@ import { useCRMData } from "@/hooks/use-crm-data";
 export default function Tasks() {
   const {
     error,
+    loadDebug,
     loading,
     markTaskCompleted,
     retryTaskSync,
@@ -33,6 +34,14 @@ export default function Tasks() {
           <p>Review pending and completed DoorScale task work.</p>
           {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
+          <div className="debug-panel">
+            <strong>Load debug</strong>
+            <span>route called: {loadDebug.routeCalled}</span>
+            <span>response status: {loadDebug.responseStatus}</span>
+            <span>response body preview: {loadDebug.responseBodyPreview}</span>
+            <span>parsed transactions: {loadDebug.parsedTransactionCount}</span>
+            <span>parsed documents: {loadDebug.parsedDocumentCount}</span>
+          </div>
         </div>
       </header>
 
