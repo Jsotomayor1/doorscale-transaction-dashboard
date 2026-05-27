@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VercelRequest } from "@vercel/node";
 
 export type ActiveLocation = {
@@ -50,7 +50,7 @@ export function getRequestedLocationId(request: VercelRequest) {
 
 export async function getActiveLocation(
   request: VercelRequest,
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   routeName: string,
 ): Promise<ActiveLocation> {
   const requestedLocationId = getRequestedLocationId(request);

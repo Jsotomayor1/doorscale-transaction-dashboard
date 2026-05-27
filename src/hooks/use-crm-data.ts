@@ -63,6 +63,13 @@ export type UpdateDocumentStatusInput = {
   status: DocumentStatus;
 };
 
+export type UploadDocumentInput = {
+  documentId: string;
+  documentType: string;
+  file: File;
+  transactionId: string;
+};
+
 export type CreateTaskInput = {
   assignedTo: string;
   dueDate: string;
@@ -190,12 +197,24 @@ export type TransactionDocument = {
   documentName: string;
   doorScaleFileId: string;
   doorScaleContactId: string;
+  fileName: string;
+  filePath: string;
+  fileUrl: string;
+  ghlContactId: string;
+  ghlOpportunityId: string;
   status: string;
   uploadedAt: string;
+  uploadedBy: string;
   createdAt: string;
 };
 
-export type DocumentStatus = "needed" | "uploaded" | "missing";
+export type DocumentStatus =
+  | "needed"
+  | "uploaded"
+  | "pending_review"
+  | "approved"
+  | "rejected"
+  | "missing";
 
 export type DocumentStatusCounts = Record<DocumentStatus, number>;
 
@@ -209,6 +228,21 @@ type TransactionWriteResponse = {
   message?: string;
   ok?: boolean;
   transactionId?: string;
+};
+
+type DocumentUploadResponse = {
+  document?: Partial<TransactionDocument> & {
+    document_id?: string;
+    document_type?: string;
+    file_name?: string;
+    file_path?: string;
+    file_url?: string;
+    id?: string;
+    status?: string;
+    uploaded_at?: string;
+  };
+  message?: string;
+  ok?: boolean;
 };
 
 type SupabaseTransaction = {
@@ -265,8 +299,14 @@ type SupabaseTransactionDocument = {
   document_name: string | null;
   doorscale_file_id: string | null;
   doorscale_contact_id: string | null;
+  file_name?: string | null;
+  file_path?: string | null;
+  file_url?: string | null;
+  ghl_contact_id?: string | null;
+  ghl_opportunity_id?: string | null;
   status: string | null;
   uploaded_at: string | null;
+  uploaded_by?: string | null;
   created_at: string | null;
 };
 
@@ -302,9 +342,12 @@ type CrmDataState = {
 };
 
 function normalizeDocumentStatusValue(status = "needed"): DocumentStatus {
-  const normalizedStatus = status.trim().toLowerCase();
+  const normalizedStatus = status.trim().toLowerCase().replace(/\s+/g, "_");
 
   if (normalizedStatus === "uploaded") return "uploaded";
+  if (normalizedStatus === "pending_review") return "pending_review";
+  if (normalizedStatus === "approved") return "approved";
+  if (normalizedStatus === "rejected") return "rejected";
   if (normalizedStatus === "missing") return "missing";
   return "needed";
 }
@@ -313,6 +356,9 @@ function emptyDocumentCounts(): DocumentStatusCounts {
   return {
     needed: 0,
     uploaded: 0,
+    pending_review: 0,
+    approved: 0,
+    rejected: 0,
     missing: 0,
   };
 }
@@ -483,6 +529,14 @@ function mapSupabaseData(
   supabaseDocuments: SupabaseTransactionDocument[],
 ): CrmDataState {
   const documents = supabaseDocuments.map<TransactionDocument>((document) => ({
+    fileName:
+      document.file_name ??
+      document.doorscale_file_id?.split("/").pop()?.replace(/^\d+-/, "") ??
+      "",
+    filePath: document.file_path ?? document.doorscale_file_id ?? "",
+    fileUrl: document.file_url ?? "",
+    ghlContactId: document.ghl_contact_id ?? "",
+    ghlOpportunityId: document.ghl_opportunity_id ?? "",
     id: document.id,
     transactionId: document.transaction_id ?? "",
     documentType: document.document_type ?? "",
@@ -491,6 +545,7 @@ function mapSupabaseData(
     doorScaleContactId: document.doorscale_contact_id ?? "",
     status: normalizeDocumentStatusValue(document.status ?? undefined),
     uploadedAt: document.uploaded_at ?? "",
+    uploadedBy: document.uploaded_by ?? "",
     createdAt: document.created_at ?? "",
   }));
   const documentCountsByTransaction = documents.reduce<
@@ -1524,6 +1579,98 @@ export function useCrmData() {
     [activeLocationId, refreshData],
   );
 
+  const uploadTransactionDocument = useCallback(
+    async ({ documentId, documentType, file, transactionId }: UploadDocumentInput) => {
+      if (isDemoMode()) {
+        const uploadedAt = new Date().toISOString();
+
+        setData((currentData) => ({
+          ...currentData,
+          documents: currentData.documents.map((document) =>
+            document.id === documentId
+              ? {
+                  ...document,
+                  fileName: file.name,
+                  status: "uploaded",
+                  uploadedAt,
+                }
+              : document,
+          ),
+        }));
+        return;
+      }
+
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Open this dashboard from your DoorScale account.");
+      }
+
+      const formData = new FormData();
+      formData.append("active_location_id", locationId);
+      formData.append("document_id", documentId);
+      formData.append("documentId", documentId);
+      formData.append("documentType", documentType);
+      formData.append("transaction_id", transactionId);
+      formData.append("transactionId", transactionId);
+      formData.append("file", file);
+
+      const response = await fetch("/api/documents/upload", {
+        method: "POST",
+        headers: {
+          ...getDoorScaleLocationHeaders(locationId),
+        },
+        body: formData,
+      });
+      const result = (await response.json().catch(() => ({}))) as DocumentUploadResponse;
+
+      if (!response.ok || result.ok === false) {
+        throw new Error(result.message || "Unable to upload document.");
+      }
+
+      if (result.document) {
+        setData((currentData) => ({
+          ...currentData,
+          documents: currentData.documents.map((document) =>
+            document.id === documentId
+              ? {
+                  ...document,
+                  doorScaleFileId:
+                    result.document?.doorScaleFileId ||
+                    result.document?.file_path ||
+                    result.document?.filePath ||
+                    document.doorScaleFileId,
+                  fileName:
+                    result.document?.fileName ||
+                    result.document?.file_name ||
+                    file.name,
+                  filePath:
+                    result.document?.filePath ||
+                    result.document?.file_path ||
+                    document.filePath,
+                  fileUrl:
+                    result.document?.fileUrl ||
+                    result.document?.file_url ||
+                    document.fileUrl,
+                  status: normalizeDocumentStatusValue(
+                    result.document?.status ?? "uploaded",
+                  ),
+                  uploadedAt:
+                    result.document?.uploadedAt ||
+                    result.document?.uploaded_at ||
+                    new Date().toISOString(),
+                }
+              : document,
+          ),
+        }));
+        return;
+      }
+
+      await refreshData();
+    },
+    [activeLocationId, refreshData],
+  );
+
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
@@ -1601,6 +1748,7 @@ export function useCrmData() {
       retryTransactionSync,
       retryTaskSync,
       updateDocumentStatus,
+      uploadTransactionDocument,
     };
   }, [
     createTask,
@@ -1613,6 +1761,7 @@ export function useCrmData() {
     retryTaskSync,
     retryTransactionSync,
     updateDocumentStatus,
+    uploadTransactionDocument,
     updateTransactionDetails,
     updateTaskDueDateTime,
     updateTransactionStage,

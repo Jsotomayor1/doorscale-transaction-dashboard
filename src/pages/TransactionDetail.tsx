@@ -7,8 +7,9 @@ import {
   FileText,
   Pencil,
   StickyNote,
+  Upload,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { EditTransactionModal } from "@/components/EditTransactionModal";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/card";
 import {
   TRANSACTION_STAGES,
+  type DocumentStatus,
   type TransactionStage,
   useCRMData,
 } from "@/hooks/use-crm-data";
@@ -89,17 +91,25 @@ function getSyncVariant(syncStatus = "synced") {
 }
 
 function documentStatusVariant(status: string) {
-  const normalizedStatus = status.toLowerCase();
+  const normalizedStatus = normalizeDocumentStatus(status);
 
-  if (normalizedStatus === "uploaded") return "success";
-  if (normalizedStatus === "missing") return "danger";
+  if (normalizedStatus === "uploaded" || normalizedStatus === "approved") {
+    return "success";
+  }
+  if (normalizedStatus === "rejected" || normalizedStatus === "missing") {
+    return "danger";
+  }
+  if (normalizedStatus === "pending review") return "default";
   return "warning";
 }
 
 function normalizeDocumentStatus(status = "Needed") {
-  const normalizedStatus = status.toLowerCase();
+  const normalizedStatus = status.trim().toLowerCase().replace(/_/g, " ");
 
   if (normalizedStatus === "uploaded") return "uploaded";
+  if (normalizedStatus === "pending review") return "pending review";
+  if (normalizedStatus === "approved") return "approved";
+  if (normalizedStatus === "rejected") return "rejected";
   if (normalizedStatus === "missing") return "missing";
   return "needed";
 }
@@ -108,6 +118,9 @@ function formatDocumentStatus(status = "Needed") {
   const normalizedStatus = normalizeDocumentStatus(status);
 
   if (normalizedStatus === "uploaded") return "Uploaded";
+  if (normalizedStatus === "pending review") return "Pending Review";
+  if (normalizedStatus === "approved") return "Approved";
+  if (normalizedStatus === "rejected") return "Rejected";
   if (normalizedStatus === "missing") return "Missing";
   return "Needed";
 }
@@ -138,6 +151,8 @@ export default function TransactionDetail() {
   const [isRetryingSync, setIsRetryingSync] = useState(false);
   const [detailMessage, setDetailMessage] = useState("");
   const [detailError, setDetailError] = useState("");
+  const [uploadingDocumentId, setUploadingDocumentId] = useState("");
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -297,7 +312,7 @@ export default function TransactionDetail() {
     try {
       await data.updateDocumentStatus({
         documentId,
-        status: status as "needed" | "uploaded" | "missing",
+        status: status as DocumentStatus,
       });
       setDetailMessage("Document status updated.");
     } catch (error) {
@@ -306,6 +321,37 @@ export default function TransactionDetail() {
           ? error.message
           : "Unable to update document status.",
       );
+    }
+  }
+
+  async function handleDocumentUpload(
+    documentId: string,
+    documentType: string,
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    setDetailMessage("");
+    setDetailError("");
+    setUploadingDocumentId(documentId);
+
+    try {
+      await data.uploadTransactionDocument({
+        documentId,
+        documentType,
+        file,
+        transactionId,
+      });
+      setDetailMessage("Document uploaded.");
+    } catch (error) {
+      setDetailError(
+        error instanceof Error ? error.message : "Unable to upload document.",
+      );
+    } finally {
+      setUploadingDocumentId("");
     }
   }
 
@@ -697,18 +743,15 @@ export default function TransactionDetail() {
             <div>
               <CardTitle>Documents</CardTitle>
               <CardDescription>
-                Coming soon through the DoorScale account connection.
+                Track uploaded documents for this transaction.
               </CardDescription>
             </div>
           </CardHeader>
           <CardContent>
             <p className="documents-helper">
-              Document uploads will connect to DoorScale contact records in a
-              future release.
+              Uploaded files stay connected to this DoorScale transaction and
+              contact.
             </p>
-            <Button disabled variant="secondary">
-              Connect document storage
-            </Button>
             <div className="placeholder-list">
               {documentTrackingRows.map(({ document, documentType }) => (
                 <div className="placeholder-row" key={documentType}>
@@ -716,9 +759,10 @@ export default function TransactionDetail() {
                   <div>
                     <span>{document?.documentName || documentType}</span>
                     <small>
-                      {document?.uploadedAt
-                        ? `Uploaded ${formatDate(document.uploadedAt)}`
-                        : "No upload date"}
+                      {document?.fileName ||
+                        (document?.uploadedAt
+                          ? `Uploaded ${formatDate(document.uploadedAt)}`
+                          : "No upload date")}
                     </small>
                   </div>
                   <Badge
@@ -743,8 +787,53 @@ export default function TransactionDetail() {
                   >
                     <option value="needed">Needed</option>
                     <option value="uploaded">Uploaded</option>
-                    <option value="missing">Missing</option>
+                    <option value="pending review">Pending Review</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
                   </select>
+                  <div className="document-actions">
+                    {document?.fileUrl ? (
+                      <a
+                        className="button button--ghost"
+                        href={document.fileUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        View File
+                      </a>
+                    ) : null}
+                    <input
+                      aria-label={`Upload ${documentType}`}
+                      className="visually-hidden"
+                      disabled={!document || uploadingDocumentId === document?.id}
+                      onChange={(event) =>
+                        document
+                          ? void handleDocumentUpload(
+                              document.id,
+                              document.documentType || documentType,
+                              event,
+                            )
+                          : undefined
+                      }
+                      ref={(element) => {
+                        if (document) fileInputRefs.current[document.id] = element;
+                      }}
+                      type="file"
+                    />
+                    <Button
+                      disabled={!document || uploadingDocumentId === document?.id}
+                      onClick={() =>
+                        document
+                          ? fileInputRefs.current[document.id]?.click()
+                          : undefined
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      <Upload size={15} />
+                      {document?.fileName ? "Replace File" : "Upload"}
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
