@@ -6,7 +6,7 @@ import {
   logRouteDataCounts,
 } from "../_active-location.js";
 
-const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities";
+const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
 const CONTACTS_URL = "https://services.leadconnectorhq.com/contacts/";
 const CONTACTS_SEARCH_URL = "https://services.leadconnectorhq.com/contacts/search";
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
@@ -458,7 +458,10 @@ export default async function handler(
   let writeBackFailed = false;
   let contactId = transactionRow.ghl_contact_id ?? transactionRow.contact_id ?? undefined;
   let opportunityId = transactionRow.ghl_opportunity_id ?? undefined;
+  let pipelineId: string | undefined;
+  let pipelineStageId: string | undefined;
   let matchedPipelineStageId: string | undefined;
+  let stageName: string | undefined;
 
   try {
     const connectedAccount = await getActiveLocation(
@@ -471,10 +474,8 @@ export default async function handler(
       throw new Error("DoorScale account does not match this transaction.");
     }
 
-    let pipelineId: string | undefined;
-    let pipelineStageId: string | undefined;
-
     const selectedStage = body.stage || transactionRow.stage || "";
+    stageName = selectedStage || undefined;
 
     if (selectedStage) {
       const pipelineConfig = await getPipelineConfig(
@@ -524,6 +525,7 @@ export default async function handler(
       };
 
       console.log("DoorScale opportunity create request:", {
+        endpoint: OPPORTUNITIES_URL,
         ...opportunityPayload,
       });
 
@@ -540,6 +542,7 @@ export default async function handler(
       const rawBody = await createResponse.text();
       console.log("DoorScale opportunity create response:", {
         body: rawBody,
+        endpoint: OPPORTUNITIES_URL,
         status: createResponse.status,
       });
 
@@ -553,9 +556,13 @@ export default async function handler(
       }
 
       opportunityId = getOpportunityId(JSON.parse(rawBody) as OpportunityResponse);
+      console.log("DoorScale opportunity created:", {
+        opportunityId,
+        status: createResponse.status,
+      });
     } else {
       const updateResponse = await fetch(
-        `${OPPORTUNITIES_URL}/${transactionRow.ghl_opportunity_id}`,
+        `${OPPORTUNITIES_URL}${transactionRow.ghl_opportunity_id}`,
         {
           method: "PUT",
           headers: {
@@ -612,6 +619,9 @@ export default async function handler(
           }
         : {}),
       ...(opportunityId ? { ghl_opportunity_id: opportunityId } : {}),
+      ...(pipelineId ? { pipeline_id: pipelineId } : {}),
+      ...(pipelineStageId ? { pipeline_stage_id: pipelineStageId } : {}),
+      ...(stageName ? { stage_name: stageName } : {}),
       ...(clientName ? { contact_name: clientName } : {}),
       ...getSyncFields(body, writeBackFailed),
     })
