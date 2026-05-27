@@ -34,7 +34,7 @@ export default function ChooseAccount() {
       setError("");
 
       try {
-        const response = await fetch("/api/ghl/locations");
+        const response = await fetch("/api/ghl?action=locations");
         const result = (await response.json()) as LocationsResponse;
 
         if (!isMounted) return;
@@ -70,12 +70,12 @@ export default function ChooseAccount() {
     setIsSaving(locationId);
 
     try {
-      const response = await fetch("/api/ghl/select-location", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ locationId }),
+        body: JSON.stringify({ action: "selectLocation", locationId }),
       });
       const result = (await response.json().catch(() => ({}))) as {
         message?: string;

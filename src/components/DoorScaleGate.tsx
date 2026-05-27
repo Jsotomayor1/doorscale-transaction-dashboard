@@ -36,8 +36,16 @@ export function DoorScaleGate() {
       setIsChecking(true);
 
       try {
-        const response = await fetch("/api/ghl/status", {
-          headers: getDoorScaleLocationHeaders(),
+        const response = await fetch("/api/ghl", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getDoorScaleLocationHeaders(),
+          },
+          body: JSON.stringify({
+            action: "status",
+            active_location_id: urlLocationId,
+          }),
         });
         const status = (await response.json().catch(() => ({}))) as StatusResponse;
 

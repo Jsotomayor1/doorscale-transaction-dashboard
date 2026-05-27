@@ -1081,7 +1081,7 @@ export function useCrmData() {
         throw new Error("Connect DoorScale to save transaction data.");
       }
 
-      const response = await fetch("/api/ghl/transactions/create", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1089,6 +1089,7 @@ export function useCrmData() {
         },
         body: JSON.stringify({
           ...input,
+          action: "createTransaction",
           active_location_id: locationId,
           locationId,
           status: "active",
@@ -1155,13 +1156,14 @@ export function useCrmData() {
         throw new Error("Connect DoorScale to save transaction data.");
       }
 
-      const response = await fetch("/api/ghl/transactions/update", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          action: "updateTransaction",
           active_location_id: locationId,
           locationId,
           stage: input.stage,
@@ -1281,13 +1283,18 @@ export function useCrmData() {
         throw new Error("Connect DoorScale to save transaction data.");
       }
 
-      const response = await fetch("/api/ghl/transactions/update", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
-        body: JSON.stringify({ ...input, active_location_id: locationId, locationId }),
+        body: JSON.stringify({
+          ...input,
+          action: "updateTransaction",
+          active_location_id: locationId,
+          locationId,
+        }),
       });
       const result = await parseTransactionWriteResponse(response);
 
@@ -1331,13 +1338,14 @@ export function useCrmData() {
         throw new Error("Connect DoorScale to save task data.");
       }
 
-      const response = await fetch("/api/ghl/tasks/create", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          action: "createTask",
           active_location_id: locationId,
           assignedTo: input.assignedTo,
           dueDate: input.dueDate || null,
@@ -1379,13 +1387,14 @@ export function useCrmData() {
         throw new Error("Connect DoorScale to save task data.");
       }
 
-      const response = await fetch("/api/ghl/tasks/update", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          action: "updateTask",
           active_location_id: locationId,
           locationId,
           status: "completed",
@@ -1431,13 +1440,14 @@ export function useCrmData() {
         throw new Error("Connect DoorScale to save task data.");
       }
 
-      const response = await fetch("/api/ghl/tasks/update", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          action: "updateTask",
           active_location_id: locationId,
           dueDate: dueDate || null,
           dueDateTime,
@@ -1469,22 +1479,23 @@ export function useCrmData() {
       }
 
       const fields = transaction.customFields;
-      const endpoint = transaction.ghlOpportunityId
-        ? "/api/ghl/transactions/update"
-        : "/api/ghl/transactions/create";
+      const action = transaction.ghlOpportunityId
+        ? "updateTransaction"
+        : "createTransaction";
       const locationId = activeLocationId || (await getActiveLocationId());
 
       if (!locationId) {
         throw new Error("Connect DoorScale to save transaction data.");
       }
 
-      const response = await fetch(endpoint, {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          action,
           active_location_id: locationId,
           buyerName: fields.buyerName,
           closingDate: fields.closingDate,
@@ -1518,22 +1529,21 @@ export function useCrmData() {
         throw new Error("Task not found.");
       }
 
-      const endpoint = task.ghlTaskId
-        ? "/api/ghl/tasks/update"
-        : "/api/ghl/tasks/create";
+      const action = task.ghlTaskId ? "updateTask" : "createTask";
       const locationId = activeLocationId || (await getActiveLocationId());
 
       if (!locationId) {
         throw new Error("Connect DoorScale to save task data.");
       }
 
-      const response = await fetch(endpoint, {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          action,
           active_location_id: locationId,
           assignedTo: task.assignedTo,
           dueDate: task.dueDate || null,
@@ -1575,13 +1585,14 @@ export function useCrmData() {
       }
       const locationId = activeLocationId || (await getActiveLocationId());
 
-      const response = await fetch("/api/documents/status", {
+      const response = await fetch("/api/documents", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(locationId),
         },
         body: JSON.stringify({
+          action: "updateStatus",
           active_location_id: locationId,
           document_id: documentId,
           status,
@@ -1655,7 +1666,9 @@ export function useCrmData() {
       formData.append("transactionId", transactionId);
       formData.append("file", file);
 
-      const response = await fetch("/api/documents/upload", {
+      formData.append("action", "upload");
+
+      const response = await fetch("/api/documents?action=upload", {
         method: "POST",
         headers: {
           ...getDoorScaleLocationHeaders(locationId),

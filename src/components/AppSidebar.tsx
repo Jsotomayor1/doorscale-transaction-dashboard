@@ -26,8 +26,16 @@ export function AppSidebar() {
 
     async function checkStatus() {
       try {
-        const response = await fetch("/api/ghl/status", {
-          headers: getDoorScaleLocationHeaders(),
+        const response = await fetch("/api/ghl", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getDoorScaleLocationHeaders(),
+          },
+          body: JSON.stringify({
+            action: "status",
+            active_location_id: getStoredActiveLocationId(),
+          }),
         });
         const status = (await response.json()) as {
           connected?: boolean;
@@ -65,13 +73,14 @@ export function AppSidebar() {
     setIsSyncing(true);
 
     try {
-      const response = await fetch("/api/ghl/sync", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...getDoorScaleLocationHeaders(),
         },
         body: JSON.stringify({
+          action: "sync",
           active_location_id: getStoredActiveLocationId(),
         }),
       });

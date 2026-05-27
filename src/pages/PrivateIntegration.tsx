@@ -57,7 +57,7 @@ export default function PrivateIntegration() {
     setIsSaving(true);
 
     try {
-      const response = await fetch("/api/ghl/private-connect", {
+      const response = await fetch("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -65,6 +65,7 @@ export default function PrivateIntegration() {
         },
         body: JSON.stringify({
           ...form,
+          action: "privateConnect",
           active_location_id: locationId,
           location_id: locationId,
         }),

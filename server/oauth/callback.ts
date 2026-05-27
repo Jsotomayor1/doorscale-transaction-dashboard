@@ -278,9 +278,10 @@ export default async function handler(
       !directLocationId ||
       tokenData.userType?.toLowerCase() === "company" ||
       tokenData.isBulkInstallation === true;
-    const installedLocations = needsLocationSelection
-      ? await getInstalledLocations(tokenData.access_token, companyId, appId)
-      : [];
+    const installedLocations =
+      needsLocationSelection && companyId
+        ? await getInstalledLocations(tokenData.access_token, companyId, appId)
+        : [];
     const locationId =
       directLocationId ??
       (companyId ? `company:${companyId}` : undefined) ??

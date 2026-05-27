@@ -135,12 +135,13 @@ function formatDocumentStatus(status = "Needed") {
 
 function buildDocumentViewLink(documentId: string, transactionId: string) {
   const params = new URLSearchParams({
+    action: "view",
     document_id: documentId,
     transaction_id: transactionId,
     location_id: getUrlActiveLocationId() || getStoredActiveLocationId() || "",
   });
 
-  return `/api/documents/view?${params.toString()}`;
+  return `/api/documents?${params.toString()}`;
 }
 
 function buildContactLink(locationId?: string, contactId?: string) {

@@ -39,9 +39,13 @@ export default async function handler(
     return;
   }
 
+  const row = data as {
+    connection_status?: string | null;
+    location_name?: string | null;
+  } | null;
   const connected =
-    Boolean(data) &&
-    (data.connection_status === "connected" || data.connection_status === null);
+    Boolean(row) &&
+    (row?.connection_status === "connected" || row?.connection_status === null);
 
   console.log("DoorScale status check:", {
     activeLocationId,
@@ -52,6 +56,6 @@ export default async function handler(
   response.status(200).json({
     activeLocationId,
     connected,
-    locationName: data?.location_name || "",
+    locationName: row?.location_name || "",
   });
 }

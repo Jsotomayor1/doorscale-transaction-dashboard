@@ -69,6 +69,15 @@ type ContactCreateResponse = {
   id?: string;
 };
 
+type ContactIdResult = {
+  contact?: {
+    id?: string;
+    _id?: string;
+  };
+  id?: string;
+  _id?: string;
+};
+
 type OpportunityResponse = {
   id?: string;
   opportunity?: {
@@ -116,12 +125,14 @@ function getContacts(payload: ContactSearchResponse) {
   return [];
 }
 
-function getContactId(result: any): string | null {
+function getContactId(result: unknown): string | null {
+  const payload = result as ContactIdResult | null;
+
   return (
-    result?.contact?.id ||
-    result?.contact?._id ||
-    result?.id ||
-    result?._id ||
+    payload?.contact?.id ||
+    payload?.contact?._id ||
+    payload?.id ||
+    payload?._id ||
     null
   );
 }
@@ -356,11 +367,11 @@ export default async function handler(
       throw new Error("DoorScale stage could not be matched.");
     }
 
-    contactId = await findOrCreateContact(
+    contactId = (await findOrCreateContact(
       connectedAccount.access_token,
       connectedAccount.location_id,
       body,
-    );
+    )) ?? undefined;
 
     if (!contactId) {
       throw new Error("DoorScale contact could not be created.");

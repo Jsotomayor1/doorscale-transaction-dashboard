@@ -31,6 +31,40 @@ type StoredConnection = {
   user_type?: string | null;
 };
 
+type LooseQueryResult = {
+  data?: unknown;
+  error?: unknown;
+};
+
+type LooseQueryBuilder = PromiseLike<LooseQueryResult> & {
+  eq(column: string, value: unknown): LooseQueryBuilder;
+  in(column: string, values: unknown[]): LooseQueryBuilder;
+  insert(values: unknown): LooseQueryBuilder;
+  maybeSingle(): Promise<LooseQueryResult>;
+  select(columns?: string): LooseQueryBuilder;
+  single(): Promise<LooseQueryResult>;
+  update(values: unknown): LooseQueryBuilder;
+};
+
+type LooseSupabase = {
+  from(table: string): LooseQueryBuilder;
+};
+
+type ParentConnectionRow = {
+  access_token?: string | null;
+  company_id?: string | null;
+  selected_location_id?: string | null;
+};
+
+type NormalizedTransactionFields = {
+  buyer_name?: string | null;
+  buyerName?: string | null;
+  property_address?: string | null;
+  propertyAddress?: string | null;
+  seller_name?: string | null;
+  sellerName?: string | null;
+};
+
 type LocationTokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -333,7 +367,7 @@ function isCompanyInstall(connection: StoredConnection) {
 }
 
 async function getLocationAccessToken(
-  supabase: any,
+  supabase: LooseSupabase,
   connection: StoredConnection,
 ) {
   const selectedLocationId = isCompanyInstall(connection)
@@ -432,7 +466,7 @@ async function getLocationAccessToken(
       throw new Error("location_token_unavailable");
     }
 
-    const parent = parentConnection as any;
+    const parent = parentConnection as ParentConnectionRow;
 
     if (!parent.access_token) {
       console.error("DoorScale sync parent company token missing:", {
@@ -492,7 +526,7 @@ async function getLocationAccessToken(
   const expiresAt = new Date(
     Date.now() + Number(tokenData.expires_in || 86400) * 1000,
   ).toISOString();
-  const db = supabase as any;
+  const db = supabase as LooseSupabase;
   const { error } = await db
     .from("ghl_locations")
     .update({
@@ -815,7 +849,7 @@ function getNestedCustomObjectValue(
   opportunity: DoorScaleOpportunity,
   fieldKey: "seller_name" | "buyer_name" | "property_address",
 ) {
-  const normalized = getObjectTransaction(opportunity) as any;
+  const normalized = getObjectTransaction(opportunity) as NormalizedTransactionFields;
 
   switch (fieldKey) {
     case "seller_name":
@@ -1161,11 +1195,11 @@ type ExistingDocument = {
 };
 
 async function generateDocumentChecklist(
-  supabase: any,
+  supabase: LooseSupabase,
   transaction: SyncedTransaction,
   locationId: string,
 ) {
-  const db = supabase as any;
+  const db = supabase as LooseSupabase;
 
   if (!transaction.transaction_type || !transaction.stage) {
     return;
@@ -1241,11 +1275,11 @@ async function generateDocumentChecklist(
 }
 
 async function saveSyncedTransactions(
-  supabase: any,
+  supabase: LooseSupabase,
   payload: TransactionUpsertPayload[],
   locationId: string,
 ) {
-  const db = supabase as any;
+  const db = supabase as LooseSupabase;
   const syncedRows: SyncedTransaction[] = [];
 
   for (const transaction of payload) {
@@ -1283,11 +1317,11 @@ async function saveSyncedTransactions(
 }
 
 async function saveSyncedTasks(
-  supabase: any,
+  supabase: LooseSupabase,
   payload: TaskUpsertPayload[],
   locationId: string,
 ) {
-  const db = supabase as any;
+  const db = supabase as LooseSupabase;
   const taskIds = payload.map((task) => task.ghl_task_id);
   const { data: existingTasks, error: existingTasksError } = await db
     .from("tasks")
@@ -1386,7 +1420,10 @@ export default async function handler(
   let syncToken: string;
   let selectedLocationId: string;
   try {
-    const locationToken = await getLocationAccessToken(supabase, connection);
+    const locationToken = await getLocationAccessToken(
+      supabase as unknown as LooseSupabase,
+      connection,
+    );
     syncToken = locationToken.accessToken;
     selectedLocationId = locationToken.locationId;
   } catch (error) {
@@ -1544,7 +1581,7 @@ export default async function handler(
 
     try {
       syncedTransactionRows = await saveSyncedTransactions(
-        supabase,
+        supabase as unknown as LooseSupabase,
         payload,
         selectedLocationId,
       );
@@ -1559,7 +1596,11 @@ export default async function handler(
 
     await Promise.all(
       syncedTransactionRows.map((transaction) =>
-        generateDocumentChecklist(supabase, transaction, selectedLocationId),
+        generateDocumentChecklist(
+          supabase as unknown as LooseSupabase,
+          transaction,
+          selectedLocationId,
+        ),
       ),
     );
     const transactionByOpportunityId = new Map(
@@ -1594,7 +1635,7 @@ export default async function handler(
     if (taskPayload.length) {
       try {
         syncedTasks = await saveSyncedTasks(
-          supabase,
+          supabase as unknown as LooseSupabase,
           taskPayload,
           selectedLocationId,
         );
