@@ -1675,6 +1675,7 @@ export function useCrmData() {
         },
         body: formData,
       });
+      console.log("Document upload response status:", response.status);
       const result = (await response.json().catch(() => ({}))) as DocumentUploadResponse;
 
       if (!response.ok || result.ok === false) {

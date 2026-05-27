@@ -220,6 +220,7 @@ export default function TransactionDetail() {
 
   const fields = transaction.customFields;
   const transactionId = String(transaction.id);
+  const activeLocationId = getUrlActiveLocationId() || getStoredActiveLocationId();
   const transactionType = fields.transactionType;
   const currentStage = transaction.stage;
   const contactLink = buildContactLink(
@@ -358,6 +359,7 @@ export default function TransactionDetail() {
 
     if (!file) return;
 
+    console.log("Selected document file:", file.name);
     setDetailMessage("");
     setDetailError("");
     setUploadingDocumentId(documentId);
@@ -771,92 +773,102 @@ export default function TransactionDetail() {
           </CardHeader>
           <CardContent>
             <div className="placeholder-list">
-              {documentTrackingRows.map(({ document, documentType }) => (
-                <div className="placeholder-row" key={documentType}>
-                  <FileText size={16} />
-                  <div>
-                    <span>{document?.documentName || documentType}</span>
-                    <small>{document?.fileName || "No file uploaded"}</small>
-                    <small>
-                      {document?.uploadedAt
-                        ? `Uploaded ${formatDate(document.uploadedAt)}`
-                        : "No upload date"}
-                    </small>
-                  </div>
-                  <Badge
-                    variant={documentStatusVariant(
-                      document?.status || "Needed",
-                    )}
-                  >
-                    {formatDocumentStatus(document?.status)}
-                  </Badge>
-                  <select
-                    aria-label={`Update ${documentType} status`}
-                    onChange={(event) =>
-                      document
-                        ? void handleDocumentStatusChange(
-                            document.id,
-                            event.target.value,
-                          )
-                        : undefined
-                    }
-                    value={normalizeDocumentStatus(document?.status)}
-                  >
-                    <option value="needed">Needed</option>
-                    <option value="uploaded">Uploaded</option>
-                    <option value="pending review">Pending Review</option>
-                    <option value="approved">Approved</option>
-                    <option value="rejected">Rejected</option>
-                  </select>
-                  <div className="document-actions">
-                    {document?.doorScaleFileId ? (
-                      <a
-                        className="button button--ghost"
-                        href={buildDocumentViewLink(document.id, transactionId)}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        View File
-                      </a>
-                    ) : null}
-                    <input
-                      aria-label={`Upload ${documentType}`}
-                      className="visually-hidden"
-                      disabled={!document || uploadingDocumentId === document?.id}
+              {documentTrackingRows.map(({ document, documentType }) => {
+                const uploadDisabled =
+                  !activeLocationId || !transactionId || !document?.id;
+
+                return (
+                  <div className="placeholder-row" key={documentType}>
+                    <FileText size={16} />
+                    <div>
+                      <span>{document?.documentName || documentType}</span>
+                      <small>{document?.fileName || "No file uploaded"}</small>
+                      <small>
+                        {document?.uploadedAt
+                          ? `Uploaded ${formatDate(document.uploadedAt)}`
+                          : "No upload date"}
+                      </small>
+                    </div>
+                    <Badge
+                      variant={documentStatusVariant(
+                        document?.status || "Needed",
+                      )}
+                    >
+                      {formatDocumentStatus(document?.status)}
+                    </Badge>
+                    <select
+                      aria-label={`Update ${documentType} status`}
                       onChange={(event) =>
                         document
-                          ? void handleDocumentUpload(
+                          ? void handleDocumentStatusChange(
                               document.id,
-                              document.documentType || documentType,
-                              event,
+                              event.target.value,
                             )
                           : undefined
                       }
-                      ref={(element) => {
-                        if (document) fileInputRefs.current[document.id] = element;
-                      }}
-                      type="file"
-                    />
-                    <Button
-                      disabled={!document || uploadingDocumentId === document?.id}
-                      onClick={() =>
-                        document
-                          ? fileInputRefs.current[document.id]?.click()
-                          : undefined
-                      }
-                      type="button"
-                      variant="secondary"
+                      value={normalizeDocumentStatus(document?.status)}
                     >
-                      <Upload size={15} />
-                      {uploadingDocumentId === document?.id
-                        ? "Uploading..."
-                        : document?.fileName
-                          ? "Replace File"
-                          : "Upload"}
-                    </Button>
+                      <option value="needed">Needed</option>
+                      <option value="uploaded">Uploaded</option>
+                      <option value="pending review">Pending Review</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                    <div className="document-actions">
+                      {document?.doorScaleFileId ? (
+                        <a
+                          className="button button--ghost"
+                          href={buildDocumentViewLink(document.id, transactionId)}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          View File
+                        </a>
+                      ) : null}
+                      <input
+                        aria-label={`Upload ${documentType}`}
+                        className="visually-hidden"
+                        disabled={uploadDisabled}
+                        onChange={(event) =>
+                          document
+                            ? void handleDocumentUpload(
+                                document.id,
+                                document.documentType || documentType,
+                                event,
+                              )
+                            : undefined
+                        }
+                        ref={(element) => {
+                          if (document) fileInputRefs.current[document.id] = element;
+                        }}
+                        type="file"
+                      />
+                      <Button
+                        disabled={uploadDisabled}
+                        onClick={() => {
+                          console.log("Document upload button clicked:", {
+                            documentId: document?.id || "",
+                            documentType,
+                            transactionId,
+                          });
+                          if (document) {
+                            fileInputRefs.current[document.id]?.click();
+                          }
+                        }}
+                        type="button"
+                        variant="secondary"
+                      >
+                        <Upload size={15} />
+                        {uploadingDocumentId === document?.id
+                          ? "Uploading..."
+                          : document?.fileName
+                            ? "Replace File"
+                            : "Upload Document"}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
