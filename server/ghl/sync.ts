@@ -6,15 +6,8 @@ const OPPORTUNITIES_URL =
   "https://services.leadconnectorhq.com/opportunities/search";
 const PIPELINES_URL = "https://services.leadconnectorhq.com/opportunities/pipelines";
 const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
-const CUSTOM_FIELDS_URL_BASE = "https://services.leadconnectorhq.com";
 const LOCATION_TOKEN_URL = "https://services.leadconnectorhq.com/oauth/locationToken";
 const API_VERSION = "2021-07-28";
-const EXPECTED_FIELD_KEYS = [
-  "transaction_type",
-  "seller_name",
-  "buyer_name",
-  "property_address",
-] as const;
 
 type StoredConnection = {
   access_token?: string | null;
@@ -56,15 +49,6 @@ type ParentConnectionRow = {
   selected_location_id?: string | null;
 };
 
-type NormalizedTransactionFields = {
-  buyer_name?: string | null;
-  buyerName?: string | null;
-  property_address?: string | null;
-  propertyAddress?: string | null;
-  seller_name?: string | null;
-  sellerName?: string | null;
-};
-
 type LocationTokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -86,25 +70,6 @@ type TasksResponse = {
   data?: DoorScaleTask[];
   [key: string]: unknown;
 };
-
-type DoorScaleCustomField = {
-  id?: string;
-  fieldKey?: string;
-  key?: string;
-  name?: string;
-  model?: string;
-  objectKey?: string;
-  [key: string]: unknown;
-};
-
-type CustomFieldsResponse = {
-  customFields?: DoorScaleCustomField[];
-  fields?: DoorScaleCustomField[];
-  data?: DoorScaleCustomField[];
-  [key: string]: unknown;
-};
-
-type FieldMap = Record<(typeof EXPECTED_FIELD_KEYS)[number], string[]>;
 
 type PipelineStage = {
   id?: string;
@@ -163,45 +128,12 @@ type DoorScaleOpportunity = {
     phone?: string;
     transaction_type?: string;
     transactionType?: string;
-    customFields?: DoorScaleCustomValue[];
-    custom_fields?: DoorScaleCustomValue[];
-  };
-  custom_objects?: {
-    transactions?: {
-      buyer_name?: string;
-      property_address?: string;
-      seller_name?: string;
-    };
-  };
-  customObjects?: {
-    transactions?: {
-      buyerName?: string;
-      propertyAddress?: string;
-      sellerName?: string;
-    };
   };
   relations?: Array<{
     contactName?: string;
   }>;
-  customFields?: Array<{
-    id?: string;
-    key?: string;
-    fieldKey?: string;
-    name?: string;
-    value?: unknown;
-  }>;
-  custom_fields?: DoorScaleCustomValue[];
   tags?: unknown;
   [key: string]: unknown;
-};
-
-type DoorScaleCustomValue = {
-  id?: string;
-  fieldId?: string;
-  fieldKey?: string;
-  key?: string;
-  name?: string;
-  value?: unknown;
 };
 
 type DoorScaleTask = {
@@ -564,22 +496,6 @@ function getTasks(payload: TasksResponse) {
   return [];
 }
 
-function getCustomFields(payload: CustomFieldsResponse) {
-  if (Array.isArray(payload.customFields)) {
-    return payload.customFields;
-  }
-
-  if (Array.isArray(payload.fields)) {
-    return payload.fields;
-  }
-
-  if (Array.isArray(payload.data)) {
-    return payload.data;
-  }
-
-  return [];
-}
-
 function getPipelines(payload: PipelinesResponse) {
   if (Array.isArray(payload.pipelines)) {
     return payload.pipelines;
@@ -685,119 +601,6 @@ async function fetchTasks(accessToken: string, locationId: string) {
   }
 }
 
-function emptyFieldMap(): FieldMap {
-  return {
-    transaction_type: [],
-    seller_name: [],
-    buyer_name: [],
-    property_address: [],
-  };
-}
-
-function normalizeFieldIdentifier(value?: string) {
-  return value
-    ?.toLowerCase()
-    .replace(/^custom_field\./, "")
-    .replace(/^contact\./, "")
-    .replace(/^custom_object\.[^.]+\./, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function getFieldIdentifiers(field: DoorScaleCustomField) {
-  return [field.id, field.fieldKey, field.key, field.name]
-    .filter((value): value is string => Boolean(value))
-    .flatMap((value) => {
-      const normalized = normalizeFieldIdentifier(value);
-      return normalized ? [value, normalized] : [value];
-    });
-}
-
-function addFieldsToMap(fields: DoorScaleCustomField[], fieldMap: FieldMap) {
-  for (const field of fields) {
-    const identifiers = getFieldIdentifiers(field);
-
-    for (const expectedKey of EXPECTED_FIELD_KEYS) {
-      if (
-        identifiers.some(
-          (identifier) => normalizeFieldIdentifier(identifier) === expectedKey,
-        )
-      ) {
-        fieldMap[expectedKey] = Array.from(
-          new Set([...fieldMap[expectedKey], ...identifiers]),
-        );
-      }
-    }
-  }
-}
-
-async function fetchCustomFields(
-  accessToken: string,
-  path: string,
-  label: string,
-) {
-  try {
-    const fieldsResponse = await fetch(`${CUSTOM_FIELDS_URL_BASE}${path}`, {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        Version: API_VERSION,
-      },
-    });
-    const rawBody = await fieldsResponse.text();
-
-    if (!fieldsResponse.ok) {
-      console.log(`DoorScale ${label} field lookup unavailable:`, rawBody);
-      return [];
-    }
-
-    return getCustomFields(JSON.parse(rawBody) as CustomFieldsResponse);
-  } catch (error) {
-    console.error(`DoorScale ${label} field lookup failed:`, error);
-    return [];
-  }
-}
-
-async function buildFieldMap(accessToken: string, locationId: string) {
-  const fieldMap = emptyFieldMap();
-  const contactFields = await fetchCustomFields(
-    accessToken,
-    `/locations/${locationId}/customFields`,
-    "contact",
-  );
-  const objectFieldGroups = await Promise.all(
-    [
-      "custom_object.transactions",
-      "custom_object.transaction",
-      "custom_object.homes",
-      "custom_object.home",
-      "transactions",
-      "transaction",
-      "homes",
-      "home",
-    ].map((objectKey) =>
-      fetchCustomFields(
-        accessToken,
-        `/custom-fields/object-key/${encodeURIComponent(objectKey)}`,
-        objectKey,
-      ),
-    ),
-  );
-
-  addFieldsToMap(contactFields, fieldMap);
-  for (const fields of objectFieldGroups) {
-    addFieldsToMap(fields, fieldMap);
-  }
-
-  for (const expectedKey of EXPECTED_FIELD_KEYS) {
-    if (!fieldMap[expectedKey].length) {
-      console.log(`DoorScale field mapping missing: ${expectedKey}`);
-    }
-  }
-
-  return fieldMap;
-}
-
 function findTransactionManagementSystemPipeline(pipelines: Pipeline[]) {
   return pipelines.find(
     (pipeline) =>
@@ -811,54 +614,6 @@ function keepExistingWhenEmpty<T>(incoming: T | null | undefined, existing: T | 
   }
 
   return incoming ?? existing ?? fallback;
-}
-
-function stringifyCustomValue(value: unknown) {
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (Array.isArray(value)) return value.join(" ");
-  return "";
-}
-
-function getValueFromCustomValues(
-  values: DoorScaleCustomValue[] | undefined,
-  identifiers: string[],
-) {
-  if (!values?.length || !identifiers.length) {
-    return null;
-  }
-
-  const normalizedIdentifiers = new Set(
-    identifiers
-      .map((identifier) => normalizeFieldIdentifier(identifier))
-      .filter(Boolean),
-  );
-  const field = values.find((value) =>
-    [value.id, value.fieldId, value.fieldKey, value.key, value.name].some(
-      (identifier) =>
-        identifier &&
-        normalizedIdentifiers.has(normalizeFieldIdentifier(identifier)),
-    ),
-  );
-
-  return field ? stringifyCustomValue(field.value) || null : null;
-}
-
-function getNestedCustomObjectValue(
-  opportunity: DoorScaleOpportunity,
-  fieldKey: "seller_name" | "buyer_name" | "property_address",
-) {
-  const normalized = getObjectTransaction(opportunity) as NormalizedTransactionFields;
-
-  switch (fieldKey) {
-    case "seller_name":
-      return normalized.seller_name || normalized.sellerName || null;
-    case "buyer_name":
-      return normalized.buyer_name || normalized.buyerName || null;
-    case "property_address":
-      return normalized.property_address || normalized.propertyAddress || null;
-  }
 }
 
 function getOpportunityPipelineId(opportunity: DoorScaleOpportunity) {
@@ -877,19 +632,8 @@ function getOpportunityCommission(opportunity: DoorScaleOpportunity) {
   return opportunity.monetary_value ?? opportunity.monetaryValue;
 }
 
-function getContactTransactionType(opportunity: DoorScaleOpportunity, fieldMap: FieldMap) {
-  return (
-    opportunity.contact?.transaction_type ??
-    opportunity.contact?.transactionType ??
-    getValueFromCustomValues(
-      opportunity.contact?.customFields ?? opportunity.contact?.custom_fields,
-      fieldMap.transaction_type,
-    ) ??
-    getValueFromCustomValues(
-      opportunity.customFields ?? opportunity.custom_fields,
-      fieldMap.transaction_type,
-    )
-  );
+function getContactTransactionType(opportunity: DoorScaleOpportunity) {
+  return opportunity.contact?.transaction_type ?? opportunity.contact?.transactionType ?? null;
 }
 
 function getContactName(opportunity: DoorScaleOpportunity) {
@@ -917,44 +661,6 @@ function getContactNameParts(opportunity: DoorScaleOpportunity) {
     firstName: nameParts[0] ?? "",
     lastName: nameParts.slice(1).join(" "),
   };
-}
-
-function getObjectTransaction(opportunity: DoorScaleOpportunity) {
-  return (
-    opportunity.custom_objects?.transactions ??
-    opportunity.customObjects?.transactions ??
-    {}
-  );
-}
-
-function getObjectSellerName(opportunity: DoorScaleOpportunity, fieldMap: FieldMap) {
-  return (
-    getNestedCustomObjectValue(opportunity, "seller_name") ??
-    getValueFromCustomValues(
-      opportunity.customFields ?? opportunity.custom_fields,
-      fieldMap.seller_name,
-    )
-  );
-}
-
-function getObjectBuyerName(opportunity: DoorScaleOpportunity, fieldMap: FieldMap) {
-  return (
-    getNestedCustomObjectValue(opportunity, "buyer_name") ??
-    getValueFromCustomValues(
-      opportunity.customFields ?? opportunity.custom_fields,
-      fieldMap.buyer_name,
-    )
-  );
-}
-
-function getObjectPropertyAddress(opportunity: DoorScaleOpportunity, fieldMap: FieldMap) {
-  return (
-    getNestedCustomObjectValue(opportunity, "property_address") ??
-    getValueFromCustomValues(
-      opportunity.customFields ?? opportunity.custom_fields,
-      fieldMap.property_address,
-    )
-  );
 }
 
 function getFallbackPartyName(opportunity: DoorScaleOpportunity, transactionType?: string | null) {
@@ -1022,7 +728,6 @@ function mapOpportunityToTransaction(
   opportunity: DoorScaleOpportunity,
   fallbackLocationId: string,
   stageMap: Record<string, string>,
-  fieldMap: FieldMap,
   existing?: ExistingTransaction,
 ): TransactionUpsertPayload | null {
   if (!opportunity.id) {
@@ -1030,7 +735,7 @@ function mapOpportunityToTransaction(
   }
 
   const stageId = getOpportunityStageId(opportunity);
-  const transactionType = getContactTransactionType(opportunity, fieldMap);
+  const transactionType = getContactTransactionType(opportunity);
   const fallbackPartyName = getFallbackPartyName(opportunity, transactionType);
   const contactId =
     opportunity.contactId ??
@@ -1045,7 +750,7 @@ function mapOpportunityToTransaction(
     fallbackLocationId;
   const locationId = fallbackLocationId;
   const contactNameParts = getContactNameParts(opportunity);
-  const propertyAddress = getObjectPropertyAddress(opportunity, fieldMap);
+  const propertyAddress = opportunity.name || null;
 
   return {
     location_id: locationId,
@@ -1107,18 +812,16 @@ function mapOpportunityToTransaction(
       ? stageMap[stageId] || "Unmapped Stage"
       : "Unmapped Stage",
     buyer_name: keepExistingWhenEmpty(
-      getObjectBuyerName(opportunity, fieldMap) ??
-        (transactionType?.toLowerCase().includes("buyer")
-          ? fallbackPartyName
-          : null),
+      transactionType?.toLowerCase().includes("buyer")
+        ? fallbackPartyName
+        : null,
       existing?.buyer_name,
       "",
     ) || null,
     seller_name: keepExistingWhenEmpty(
-      getObjectSellerName(opportunity, fieldMap) ??
-        (transactionType?.toLowerCase().includes("seller")
-          ? fallbackPartyName
-          : null),
+      transactionType?.toLowerCase().includes("seller")
+        ? fallbackPartyName
+        : null,
       existing?.seller_name,
       "",
     ) || null,
@@ -1474,10 +1177,6 @@ export default async function handler(
     return;
   }
 
-  const fieldMap = await buildFieldMap(
-    syncToken,
-    selectedLocationId,
-  );
   const opportunitiesUrl = new URL(OPPORTUNITIES_URL);
   opportunitiesUrl.searchParams.set("location_id", selectedLocationId);
   opportunitiesUrl.searchParams.set("pipeline_id", pipelineIdUsed);
@@ -1574,7 +1273,6 @@ export default async function handler(
         opportunity,
         selectedLocationId,
         stageMap,
-        fieldMap,
         opportunity.id
           ? existingByOpportunityId.get(opportunity.id)
           : undefined,
