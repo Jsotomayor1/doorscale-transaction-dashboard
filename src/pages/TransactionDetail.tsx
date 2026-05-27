@@ -220,11 +220,6 @@ export default function TransactionDetail() {
 
   const fields = transaction.customFields;
   const transactionId = String(transaction.id);
-  const activeLocationId =
-    getUrlActiveLocationId() ||
-    getStoredActiveLocationId() ||
-    transaction.ghlLocationId ||
-    "";
   const transactionType = fields.transactionType;
   const currentStage = transaction.stage;
   const contactLink = buildContactLink(
@@ -779,9 +774,6 @@ export default function TransactionDetail() {
             <p className="documents-helper">Document upload UI active</p>
             <div className="placeholder-list">
               {documentTrackingRows.map(({ document, documentType }) => {
-                const uploadDisabled =
-                  !activeLocationId || !transaction.id || !document?.id;
-
                 return (
                   <div className="placeholder-row" key={documentType}>
                     <FileText size={16} />
@@ -832,8 +824,7 @@ export default function TransactionDetail() {
                       ) : null}
                       <input
                         aria-label={`Upload ${documentType}`}
-                        className="visually-hidden"
-                        disabled={uploadDisabled}
+                        style={{ display: "none" }}
                         onChange={(event) =>
                           document
                             ? void handleDocumentUpload(
@@ -849,12 +840,10 @@ export default function TransactionDetail() {
                         type="file"
                       />
                       <Button
-                        disabled={uploadDisabled}
                         onClick={() => {
-                          console.log("Upload document clicked", document?.id);
-                          if (document) {
-                            fileInputRefs.current[document.id]?.click();
-                          }
+                          if (!document) return;
+                          console.log("Upload document clicked", document.id);
+                          fileInputRefs.current[document.id]?.click();
                         }}
                         type="button"
                         variant="secondary"
