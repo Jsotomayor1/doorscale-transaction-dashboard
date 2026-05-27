@@ -274,8 +274,7 @@ async function searchContact(
   const contacts = getContacts(JSON.parse(rawBody) as ContactSearchResponse);
   const normalizedEmail = email?.trim().toLowerCase();
   const normalizedPhone = phone?.replace(/\D/g, "");
-
-  return contacts.find((contact) => {
+  const matchedContact = contacts.find((contact) => {
     const contactEmail = contact.email?.trim().toLowerCase();
     const contactPhone = contact.phone?.replace(/\D/g, "");
 
@@ -284,6 +283,13 @@ async function searchContact(
       (normalizedPhone && contactPhone === normalizedPhone)
     );
   });
+
+  console.log("DoorScale contact search result:", {
+    matchedContactId: matchedContact ? getContactId(matchedContact) : null,
+    resultCount: contacts.length,
+  });
+
+  return matchedContact;
 }
 
 async function createContact(
@@ -295,6 +301,13 @@ async function createContact(
   const nameParts = fallbackName.trim().split(/\s+/);
   const firstName = body.clientFirstName || nameParts[0] || "";
   const lastName = body.clientLastName || nameParts.slice(1).join(" ");
+  const contactPayload = {
+    email: body.clientEmail || undefined,
+    firstName,
+    lastName,
+    locationId,
+    phone: body.clientPhone || undefined,
+  };
   const contactResponse = await fetch(CONTACTS_URL, {
     method: "POST",
     headers: {
@@ -303,16 +316,7 @@ async function createContact(
       "Content-Type": "application/json",
       Version: API_VERSION,
     },
-    body: JSON.stringify({
-      email: body.clientEmail || undefined,
-      firstName,
-      first_name: firstName,
-      lastName,
-      last_name: lastName,
-      locationId,
-      location_id: locationId,
-      phone: body.clientPhone || undefined,
-    }),
+    body: JSON.stringify(contactPayload),
   });
   const rawBody = await contactResponse.text();
 
@@ -324,7 +328,14 @@ async function createContact(
     throw new Error("DoorScale contact create failed.");
   }
 
-  return getContactId(JSON.parse(rawBody) as ContactCreateResponse);
+  const contactId = getContactId(JSON.parse(rawBody) as ContactCreateResponse);
+
+  console.log("DoorScale contact created:", {
+    contactId,
+    locationId,
+  });
+
+  return contactId;
 }
 
 async function updateContact(
@@ -343,9 +354,7 @@ async function updateContact(
     body: JSON.stringify({
       email: body.clientEmail || undefined,
       firstName: body.clientFirstName || undefined,
-      first_name: body.clientFirstName || undefined,
       lastName: body.clientLastName || undefined,
-      last_name: body.clientLastName || undefined,
       phone: body.clientPhone || undefined,
     }),
   });
@@ -367,6 +376,7 @@ async function findOrCreateContact(
 ) {
   if (existingContactId) {
     await updateContact(accessToken, existingContactId, body);
+    console.log("DoorScale contact found:", { contactId: existingContactId });
     return existingContactId;
   }
 
@@ -382,6 +392,7 @@ async function findOrCreateContact(
 
   if (existingContactIdFromSearch) {
     await updateContact(accessToken, existingContactIdFromSearch, body);
+    console.log("DoorScale contact found:", { contactId: existingContactIdFromSearch });
     return existingContactIdFromSearch;
   }
 
@@ -502,6 +513,20 @@ export default async function handler(
         throw new Error("DoorScale stage could not be matched.");
       }
 
+      const opportunityPayload = {
+        contactId,
+        locationId: connectedAccount.location_id,
+        monetaryValue: Number(body.commission || 0),
+        name: getOpportunityName(body),
+        pipelineId,
+        pipelineStageId,
+        status: "open",
+      };
+
+      console.log("DoorScale opportunity create request:", {
+        ...opportunityPayload,
+      });
+
       const createResponse = await fetch(OPPORTUNITIES_URL, {
         method: "POST",
         headers: {
@@ -510,17 +535,13 @@ export default async function handler(
           "Content-Type": "application/json",
           Version: API_VERSION,
         },
-        body: JSON.stringify({
-          contactId,
-          locationId: connectedAccount.location_id,
-          monetaryValue: Number(body.commission || 0),
-          name: getOpportunityName(body),
-          pipelineId,
-          pipelineStageId,
-          status: "open",
-        }),
+        body: JSON.stringify(opportunityPayload),
       });
       const rawBody = await createResponse.text();
+      console.log("DoorScale opportunity create response:", {
+        body: rawBody,
+        status: createResponse.status,
+      });
 
       if (!createResponse.ok) {
         console.error("DoorScale opportunity create failed:", {
