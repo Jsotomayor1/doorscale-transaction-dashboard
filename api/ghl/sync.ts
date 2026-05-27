@@ -333,7 +333,7 @@ function isCompanyInstall(connection: StoredConnection) {
 }
 
 async function getLocationAccessToken(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   connection: StoredConnection,
 ) {
   const selectedLocationId = isCompanyInstall(connection)
@@ -432,7 +432,9 @@ async function getLocationAccessToken(
       throw new Error("location_token_unavailable");
     }
 
-    if (!parentConnection.access_token) {
+    const parent = parentConnection as any;
+
+    if (!parent.access_token) {
       console.error("DoorScale sync parent company token missing:", {
         parentConnectionId,
         selected_location_id: selectedLocationId,
@@ -440,7 +442,7 @@ async function getLocationAccessToken(
       throw new Error("location_token_unavailable");
     }
 
-    companyAccessToken = parentConnection.access_token as string;
+    companyAccessToken = parent.access_token as string;
   }
 
   const locationTokenBody = {
@@ -490,7 +492,8 @@ async function getLocationAccessToken(
   const expiresAt = new Date(
     Date.now() + Number(tokenData.expires_in || 86400) * 1000,
   ).toISOString();
-  const { error } = await supabase
+  const db = supabase as any;
+  const { error } = await db
     .from("ghl_locations")
     .update({
       location_access_token: tokenData.access_token,
@@ -1158,7 +1161,7 @@ type ExistingDocument = {
 };
 
 async function generateDocumentChecklist(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   transaction: SyncedTransaction,
   locationId: string,
 ) {
@@ -1238,7 +1241,7 @@ async function generateDocumentChecklist(
 }
 
 async function saveSyncedTransactions(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   payload: TransactionUpsertPayload[],
   locationId: string,
 ) {
@@ -1280,7 +1283,7 @@ async function saveSyncedTransactions(
 }
 
 async function saveSyncedTasks(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   payload: TaskUpsertPayload[],
   locationId: string,
 ) {
