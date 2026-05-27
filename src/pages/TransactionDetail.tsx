@@ -28,6 +28,10 @@ import {
   type TransactionStage,
   useCRMData,
 } from "@/hooks/use-crm-data";
+import {
+  getStoredActiveLocationId,
+  getUrlActiveLocationId,
+} from "@/lib/active-location";
 import { formatCurrency } from "@/lib/utils";
 
 const documentRows = [
@@ -37,6 +41,10 @@ const documentRows = [
   "Closing Disclosure",
   "Commission Documents",
 ];
+
+function normalizeDocumentType(documentType = "") {
+  return documentType.trim().toLowerCase();
+}
 
 const initialTaskForm = {
   assignedTo: "",
@@ -123,6 +131,16 @@ function formatDocumentStatus(status = "Needed") {
   if (normalizedStatus === "rejected") return "Rejected";
   if (normalizedStatus === "missing") return "Missing";
   return "Needed";
+}
+
+function buildDocumentViewLink(documentId: string, transactionId: string) {
+  const params = new URLSearchParams({
+    document_id: documentId,
+    transaction_id: transactionId,
+    location_id: getUrlActiveLocationId() || getStoredActiveLocationId() || "",
+  });
+
+  return `/api/documents/view?${params.toString()}`;
 }
 
 function buildContactLink(locationId?: string, contactId?: string) {
@@ -219,12 +237,17 @@ export default function TransactionDetail() {
   const documentsByType = new Map(
     data.documents
       .filter((document) => document.transactionId === transactionId)
-      .map((document) => [document.documentType, document]),
+      .map((document) => [normalizeDocumentType(document.documentType), document]),
   );
-  const documentTrackingRows = documentRows.map((documentType) => ({
-    documentType,
-    document: documentsByType.get(documentType),
-  }));
+  const documentTrackingRows = documentRows.map((documentType) => {
+    const document =
+      documentsByType.get(normalizeDocumentType(documentType)) ?? null;
+
+    return {
+      document,
+      documentType,
+    };
+  });
 
   async function handleStageChange(stage: TransactionStage) {
     setStageMessage("");
@@ -742,27 +765,21 @@ export default function TransactionDetail() {
           <CardHeader>
             <div>
               <CardTitle>Documents</CardTitle>
-              <CardDescription>
-                Track uploaded documents for this transaction.
-              </CardDescription>
+              <CardDescription>Document checklist for this transaction.</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
-            <p className="documents-helper">
-              Uploaded files stay connected to this DoorScale transaction and
-              contact.
-            </p>
             <div className="placeholder-list">
               {documentTrackingRows.map(({ document, documentType }) => (
                 <div className="placeholder-row" key={documentType}>
                   <FileText size={16} />
                   <div>
                     <span>{document?.documentName || documentType}</span>
+                    <small>{document?.fileName || "No file uploaded"}</small>
                     <small>
-                      {document?.fileName ||
-                        (document?.uploadedAt
-                          ? `Uploaded ${formatDate(document.uploadedAt)}`
-                          : "No upload date")}
+                      {document?.uploadedAt
+                        ? `Uploaded ${formatDate(document.uploadedAt)}`
+                        : "No upload date"}
                     </small>
                   </div>
                   <Badge
@@ -774,7 +791,6 @@ export default function TransactionDetail() {
                   </Badge>
                   <select
                     aria-label={`Update ${documentType} status`}
-                    disabled={!document}
                     onChange={(event) =>
                       document
                         ? void handleDocumentStatusChange(
@@ -792,10 +808,10 @@ export default function TransactionDetail() {
                     <option value="rejected">Rejected</option>
                   </select>
                   <div className="document-actions">
-                    {document?.fileUrl ? (
+                    {document?.doorScaleFileId ? (
                       <a
                         className="button button--ghost"
-                        href={document.fileUrl}
+                        href={buildDocumentViewLink(document.id, transactionId)}
                         rel="noreferrer"
                         target="_blank"
                       >
@@ -831,7 +847,11 @@ export default function TransactionDetail() {
                       variant="secondary"
                     >
                       <Upload size={15} />
-                      {document?.fileName ? "Replace File" : "Upload"}
+                      {uploadingDocumentId === document?.id
+                        ? "Uploading..."
+                        : document?.fileName
+                          ? "Replace File"
+                          : "Upload"}
                     </Button>
                   </div>
                 </div>

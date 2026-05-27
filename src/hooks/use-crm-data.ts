@@ -245,6 +245,16 @@ type DocumentUploadResponse = {
   ok?: boolean;
 };
 
+type DocumentStatusResponse = {
+  document?: Partial<TransactionDocument> & {
+    id?: string;
+    status?: string;
+    uploaded_at?: string;
+  };
+  message?: string;
+  ok?: boolean;
+};
+
 type SupabaseTransaction = {
   id: string;
   location_id: string;
@@ -1563,15 +1573,45 @@ export function useCrmData() {
       if (!client) {
         throw new Error("DoorScale connection is not configured.");
       }
+      const locationId = activeLocationId || (await getActiveLocationId());
 
-      const { error: updateError } = await client
-        .from("transaction_documents")
-        .update({ status })
-        .eq("id", documentId)
-        .eq("location_id", activeLocationId || (await getActiveLocationId()));
+      const response = await fetch("/api/documents/status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
+        },
+        body: JSON.stringify({
+          active_location_id: locationId,
+          document_id: documentId,
+          status,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as DocumentStatusResponse;
 
-      if (updateError) {
-        throw new Error("Unable to update document status.");
+      if (!response.ok || result.ok === false) {
+        throw new Error(result.message || "Unable to update document status.");
+      }
+
+      if (result.document) {
+        setData((currentData) => ({
+          ...currentData,
+          documents: currentData.documents.map((document) =>
+            document.id === documentId
+              ? {
+                  ...document,
+                  status: normalizeDocumentStatusValue(
+                    result.document?.status ?? status,
+                  ),
+                  uploadedAt:
+                    result.document?.uploadedAt ||
+                    result.document?.uploaded_at ||
+                    document.uploadedAt,
+                }
+              : document,
+          ),
+        }));
+        return;
       }
 
       await refreshData();
