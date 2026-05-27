@@ -190,10 +190,16 @@ export default function TransactionDetail() {
   const maybeCurrentStage = transaction?.stage || "";
   const transactionDocumentsForCurrentTransaction = data.documents.filter(
     (document) =>
-      document.transactionId === maybeTransactionId &&
-      document.locationId === maybeActiveLocationId &&
+      String(document.transactionId) === String(maybeTransactionId) &&
+      String(document.locationId) === String(maybeActiveLocationId) &&
       Boolean(document.id),
   );
+
+  console.log("Transaction detail document lookup:", {
+    activeLocationId: maybeActiveLocationId,
+    documentsReturnedCount: transactionDocumentsForCurrentTransaction.length,
+    transactionId: maybeTransactionId,
+  });
 
   useEffect(() => {
     let isMounted = true;

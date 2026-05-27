@@ -310,7 +310,7 @@ type SupabaseTransaction = {
 type SupabaseTask = {
   id: string;
   location_id: string;
-  transaction_id: string | null;
+  transaction_id: number | string | null;
   title: string | null;
   due_date: string | null;
   due_datetime: string | null;
@@ -326,7 +326,7 @@ type SupabaseTask = {
 type SupabaseTransactionDocument = {
   id: string;
   location_id?: string | null;
-  transaction_id: string | null;
+  transaction_id: number | string | null;
   document_type: string | null;
   document_name: string | null;
   delivery_type?: string | null;
@@ -586,7 +586,10 @@ function mapSupabaseData(
     ghlOpportunityId: document.ghl_opportunity_id ?? "",
     id: document.id,
     locationId: document.location_id ?? "",
-    transactionId: document.transaction_id ?? "",
+    transactionId:
+      document.transaction_id === null || document.transaction_id === undefined
+        ? ""
+        : String(document.transaction_id),
     documentType: document.document_type ?? "",
     documentName: document.document_name ?? "",
     deliveryType: document.delivery_type ?? "manual_upload",
@@ -602,7 +605,7 @@ function mapSupabaseData(
   const documentCountsByTransaction = documents.reduce<
     Record<string, DocumentStatusCounts>
   >((counts, document) => {
-    const transactionId = document.transactionId;
+    const transactionId = String(document.transactionId);
 
     if (!transactionId) return counts;
 
@@ -612,7 +615,7 @@ function mapSupabaseData(
   }, {});
   const transactions = supabaseTransactions.map<Transaction>((transaction) => {
     const relatedTasks = supabaseTasks.filter(
-      (task) => task.transaction_id === transaction.id,
+      (task) => String(task.transaction_id) === String(transaction.id),
     );
     const commission = Number(transaction.commission ?? 0);
 
@@ -645,7 +648,8 @@ function mapSupabaseData(
       ghlContactId: transaction.ghl_contact_id ?? transaction.contact_id ?? "",
       ghlLocationId: transaction.ghl_location_id ?? transaction.location_id ?? "",
       ghlOpportunityId: transaction.ghl_opportunity_id ?? "",
-      documentCounts: documentCountsByTransaction[transaction.id] ?? emptyDocumentCounts(),
+      documentCounts:
+        documentCountsByTransaction[String(transaction.id)] ?? emptyDocumentCounts(),
       tasks: relatedTasks.map((task) => ({
         id: task.id,
         title: task.title ?? "Untitled task",
@@ -658,7 +662,7 @@ function mapSupabaseData(
   });
 
   const transactionById = new Map(
-    transactions.map((transaction) => [transaction.id, transaction]),
+    transactions.map((transaction) => [String(transaction.id), transaction]),
   );
 
   return {
@@ -666,11 +670,17 @@ function mapSupabaseData(
     opportunities: supabaseTransactions.map((transaction) =>
       toOpportunity(
         transaction,
-        supabaseTasks.filter((task) => task.transaction_id === transaction.id),
+        supabaseTasks.filter(
+          (task) => String(task.transaction_id) === String(transaction.id),
+        ),
       ),
     ),
     tasks: supabaseTasks.map((task) => {
-      const transaction = transactionById.get(task.transaction_id ?? "");
+      const taskTransactionId =
+        task.transaction_id === null || task.transaction_id === undefined
+          ? ""
+          : String(task.transaction_id);
+      const transaction = transactionById.get(taskTransactionId);
 
       return {
         id: task.id,
@@ -679,8 +689,8 @@ function mapSupabaseData(
         dueDateTime: task.due_datetime ?? task.due_date ?? "",
         assignedTo: task.assigned_to ?? "",
         status: task.status ?? "pending",
-        relatedOpportunityId: task.transaction_id ?? "",
-        transactionId: task.transaction_id ?? "",
+        relatedOpportunityId: taskTransactionId,
+        transactionId: taskTransactionId,
         propertyAddress: transaction?.propertyAddress ?? "",
         clientName: transaction?.clientName ?? "",
         syncStatus: task.sync_status ?? "synced",
@@ -705,7 +715,10 @@ function mapSupabaseDocument(document: SupabaseTransactionDocument): Transaction
     ghlOpportunityId: document.ghl_opportunity_id ?? "",
     id: document.id,
     locationId: document.location_id ?? "",
-    transactionId: document.transaction_id ?? "",
+    transactionId:
+      document.transaction_id === null || document.transaction_id === undefined
+        ? ""
+        : String(document.transaction_id),
     documentType: document.document_type ?? "",
     documentName: document.document_name ?? "",
     deliveryType: document.delivery_type ?? "manual_upload",
@@ -2015,8 +2028,8 @@ export function useCrmData() {
             ...currentData.documents.filter(
               (document) =>
                 !(
-                  document.locationId === locationId &&
-                  document.transactionId === transactionId
+                  String(document.locationId) === String(locationId) &&
+                  String(document.transactionId) === String(transactionId)
                 ),
             ),
             ...documents,
