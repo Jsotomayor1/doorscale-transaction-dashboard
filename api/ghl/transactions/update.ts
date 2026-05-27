@@ -120,8 +120,14 @@ function getContacts(payload: ContactSearchResponse) {
   return [];
 }
 
-function getContactId(payload: ContactCreateResponse | Contact) {
-  return payload.id ?? payload.contact?.id ?? payload.contact?._id ?? payload._id;
+function getContactId(result: any): string | null {
+  return (
+    result?.contact?.id ||
+    result?.contact?._id ||
+    result?.id ||
+    result?._id ||
+    null
+  );
 }
 
 function getOpportunityId(payload: OpportunityResponse) {

@@ -423,9 +423,17 @@ async function getLocationAccessToken(
       .eq("id", parentConnectionId)
       .maybeSingle();
 
-    if (parentError || !parentConnection?.access_token) {
+    if (parentError || !parentConnection) {
       console.error("DoorScale sync parent company row lookup failed:", {
         error: parentError,
+        parentConnectionId,
+        selected_location_id: selectedLocationId,
+      });
+      throw new Error("location_token_unavailable");
+    }
+
+    if (!parentConnection.access_token) {
+      console.error("DoorScale sync parent company token missing:", {
         parentConnectionId,
         selected_location_id: selectedLocationId,
       });
@@ -804,21 +812,15 @@ function getNestedCustomObjectValue(
   opportunity: DoorScaleOpportunity,
   fieldKey: "seller_name" | "buyer_name" | "property_address",
 ) {
-  const transaction = getObjectTransaction(opportunity);
+  const normalized = getObjectTransaction(opportunity) as any;
 
   switch (fieldKey) {
     case "seller_name":
-      return "seller_name" in transaction
-        ? transaction.seller_name ?? null
-        : transaction.sellerName ?? null;
+      return normalized.seller_name || normalized.sellerName || null;
     case "buyer_name":
-      return "buyer_name" in transaction
-        ? transaction.buyer_name ?? null
-        : transaction.buyerName ?? null;
+      return normalized.buyer_name || normalized.buyerName || null;
     case "property_address":
-      return "property_address" in transaction
-        ? transaction.property_address ?? null
-        : transaction.propertyAddress ?? null;
+      return normalized.property_address || normalized.propertyAddress || null;
   }
 }
 
@@ -1160,11 +1162,13 @@ async function generateDocumentChecklist(
   transaction: SyncedTransaction,
   locationId: string,
 ) {
+  const db = supabase as any;
+
   if (!transaction.transaction_type || !transaction.stage) {
     return;
   }
 
-  const { data: templates, error: templateError } = await supabase
+  const { data: templates, error: templateError } = await db
     .from("document_templates")
     .select("document_type, location_id")
     .in("location_id", [locationId, "demo-location", "global"])
@@ -1191,7 +1195,7 @@ async function generateDocumentChecklist(
     return;
   }
 
-  const { data: existingDocuments, error: existingDocumentsError } = await supabase
+  const { data: existingDocuments, error: existingDocumentsError } = await db
     .from("transaction_documents")
     .select("document_type")
     .eq("location_id", locationId)
@@ -1224,7 +1228,7 @@ async function generateDocumentChecklist(
     return;
   }
 
-  const { error: insertError } = await supabase
+  const { error: insertError } = await db
     .from("transaction_documents")
     .insert(rows);
 
@@ -1238,10 +1242,11 @@ async function saveSyncedTransactions(
   payload: TransactionUpsertPayload[],
   locationId: string,
 ) {
+  const db = supabase as any;
   const syncedRows: SyncedTransaction[] = [];
 
   for (const transaction of payload) {
-    const { data: updatedRow, error: updateError } = await supabase
+    const { data: updatedRow, error: updateError } = await db
       .from("transactions")
       .update(transaction)
       .eq("location_id", locationId)
@@ -1258,7 +1263,7 @@ async function saveSyncedTransactions(
       continue;
     }
 
-    const { data: insertedRow, error: insertError } = await supabase
+    const { data: insertedRow, error: insertError } = await db
       .from("transactions")
       .insert(transaction)
       .select("id, ghl_opportunity_id, contact_id, transaction_type, stage")
@@ -1279,8 +1284,9 @@ async function saveSyncedTasks(
   payload: TaskUpsertPayload[],
   locationId: string,
 ) {
+  const db = supabase as any;
   const taskIds = payload.map((task) => task.ghl_task_id);
-  const { data: existingTasks, error: existingTasksError } = await supabase
+  const { data: existingTasks, error: existingTasksError } = await db
     .from("tasks")
     .select("id, ghl_task_id")
     .eq("location_id", locationId)
@@ -1302,7 +1308,7 @@ async function saveSyncedTasks(
     const existingTaskId = existingByTaskId.get(task.ghl_task_id);
 
     if (existingTaskId) {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await db
         .from("tasks")
         .update(task)
         .eq("id", existingTaskId)
@@ -1316,7 +1322,7 @@ async function saveSyncedTasks(
       continue;
     }
 
-    const { error: insertError } = await supabase.from("tasks").insert(task);
+    const { error: insertError } = await db.from("tasks").insert(task);
 
     if (insertError) {
       throw insertError;
