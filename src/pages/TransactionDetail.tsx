@@ -220,7 +220,11 @@ export default function TransactionDetail() {
 
   const fields = transaction.customFields;
   const transactionId = String(transaction.id);
-  const activeLocationId = getUrlActiveLocationId() || getStoredActiveLocationId();
+  const activeLocationId =
+    getUrlActiveLocationId() ||
+    getStoredActiveLocationId() ||
+    transaction.ghlLocationId ||
+    "";
   const transactionType = fields.transactionType;
   const currentStage = transaction.stage;
   const contactLink = buildContactLink(
@@ -772,10 +776,11 @@ export default function TransactionDetail() {
             </div>
           </CardHeader>
           <CardContent>
+            <p className="documents-helper">Document upload UI active</p>
             <div className="placeholder-list">
               {documentTrackingRows.map(({ document, documentType }) => {
                 const uploadDisabled =
-                  !activeLocationId || !transactionId || !document?.id;
+                  !activeLocationId || !transaction.id || !document?.id;
 
                 return (
                   <div className="placeholder-row" key={documentType}>
@@ -846,11 +851,7 @@ export default function TransactionDetail() {
                       <Button
                         disabled={uploadDisabled}
                         onClick={() => {
-                          console.log("Document upload button clicked:", {
-                            documentId: document?.id || "",
-                            documentType,
-                            transactionId,
-                          });
+                          console.log("Upload document clicked", document?.id);
                           if (document) {
                             fileInputRefs.current[document.id]?.click();
                           }
