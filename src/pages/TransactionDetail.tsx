@@ -9,7 +9,7 @@ import {
   StickyNote,
   Upload,
 } from "lucide-react";
-import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { EditTransactionModal } from "@/components/EditTransactionModal";
 import { Badge } from "@/components/ui/badge";
@@ -111,18 +111,20 @@ function documentStatusVariant(status: string) {
   if (normalizedStatus === "rejected" || normalizedStatus === "missing") {
     return "danger";
   }
-  if (normalizedStatus === "pending review") return "default";
+  if (normalizedStatus === "pending_review") return "default";
   if (normalizedStatus === "sent") return "default";
+  if (normalizedStatus === "viewed") return "default";
   return "warning";
 }
 
 function normalizeDocumentStatus(status = "Needed") {
-  const normalizedStatus = status.trim().toLowerCase().replace(/_/g, " ");
+  const normalizedStatus = status.trim().toLowerCase().replace(/\s+/g, "_");
 
   if (normalizedStatus === "completed") return "completed";
   if (normalizedStatus === "sent") return "sent";
+  if (normalizedStatus === "viewed") return "viewed";
   if (normalizedStatus === "uploaded") return "uploaded";
-  if (normalizedStatus === "pending review") return "pending review";
+  if (normalizedStatus === "pending_review") return "pending_review";
   if (normalizedStatus === "approved") return "approved";
   if (normalizedStatus === "rejected") return "rejected";
   if (normalizedStatus === "missing") return "missing";
@@ -134,8 +136,9 @@ function formatDocumentStatus(status = "Needed") {
 
   if (normalizedStatus === "completed") return "Completed";
   if (normalizedStatus === "sent") return "Sent";
+  if (normalizedStatus === "viewed") return "Viewed";
   if (normalizedStatus === "uploaded") return "Uploaded";
-  if (normalizedStatus === "pending review") return "Pending Review";
+  if (normalizedStatus === "pending_review") return "Pending Review";
   if (normalizedStatus === "approved") return "Approved";
   if (normalizedStatus === "rejected") return "Rejected";
   if (normalizedStatus === "missing") return "Missing";
@@ -184,7 +187,9 @@ export default function TransactionDetail() {
   const [detailMessage, setDetailMessage] = useState("");
   const [detailError, setDetailError] = useState("");
   const [uploadingDocumentId, setUploadingDocumentId] = useState("");
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [lastDocumentAction, setLastDocumentAction] = useState("None yet");
+  const [lastDocumentResponse, setLastDocumentResponse] =
+    useState("No document response yet");
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -233,6 +238,11 @@ export default function TransactionDetail() {
 
   const fields = transaction.customFields;
   const transactionId = String(transaction.id);
+  const activeLocationId =
+    getUrlActiveLocationId() ||
+    getStoredActiveLocationId() ||
+    transaction.ghlLocationId ||
+    "";
   const transactionType = fields.transactionType;
   const currentStage = transaction.stage;
   const contactLink = buildContactLink(
@@ -345,18 +355,27 @@ export default function TransactionDetail() {
   async function handleDocumentStatusChange(documentId: string, status: string) {
     setDetailMessage("");
     setDetailError("");
+    setLastDocumentAction(`Status change: ${documentId} -> ${status}`);
+    setLastDocumentResponse("Saving status...");
 
     try {
-      await data.updateDocumentStatus({
+      const result = await data.updateDocumentStatus({
         documentId,
         status: status as DocumentStatus,
+        transactionId,
       });
+      setLastDocumentResponse(
+        `${result?.status ?? "OK"}: ${result?.message ?? "Document status updated."}`,
+      );
       setDetailMessage("Document status updated.");
     } catch (error) {
-      setDetailError(
+      const message =
         error instanceof Error
           ? error.message
-          : "Unable to update document status.",
+          : "Unable to update document status.";
+      setLastDocumentResponse(`Error: ${message}`);
+      setDetailError(
+        message,
       );
     }
   }
@@ -374,20 +393,26 @@ export default function TransactionDetail() {
     console.log("Selected document file:", file.name);
     setDetailMessage("");
     setDetailError("");
+    setLastDocumentAction(`Upload: ${documentId} (${file.name})`);
+    setLastDocumentResponse("Uploading document...");
     setUploadingDocumentId(documentId);
 
     try {
-      await data.uploadTransactionDocument({
+      const result = await data.uploadTransactionDocument({
         documentId,
         documentType,
         file,
         transactionId,
       });
+      setLastDocumentResponse(
+        `${result?.status ?? "OK"}: ${result?.message ?? "Document uploaded."}`,
+      );
       setDetailMessage("Document uploaded.");
     } catch (error) {
-      setDetailError(
-        error instanceof Error ? error.message : "Unable to upload document.",
-      );
+      const message =
+        error instanceof Error ? error.message : "Unable to upload document.";
+      setLastDocumentResponse(`Error: ${message}`);
+      setDetailError(message);
     } finally {
       setUploadingDocumentId("");
     }
@@ -785,20 +810,34 @@ export default function TransactionDetail() {
           </CardHeader>
           <CardContent>
             <p className="documents-helper">Document upload UI active</p>
+            <div className="debug-panel document-debug-panel">
+              <strong>Document debug</strong>
+              <span>activeLocationId: {activeLocationId || "missing"}</span>
+              <span>transactionId: {transactionId || "missing"}</span>
+              <span>document count: {data.documents.length}</span>
+              <span>last document action: {lastDocumentAction}</span>
+              <span>last response: {lastDocumentResponse}</span>
+            </div>
             <div className="placeholder-list">
-              {documentTrackingRows.map(({ document, documentType }) => {
-                const workflowDocument = isWorkflowDocument(document?.deliveryType);
+              {documentTrackingRows.map(({ document: documentRecord, documentType }) => {
+                const workflowDocument = isWorkflowDocument(
+                  documentRecord?.deliveryType,
+                );
+                const inputId = documentRecord
+                  ? `document-upload-${documentRecord.id}`
+                  : `document-upload-${normalizeDocumentType(documentType)}`;
                 const statusOptions = workflowDocument
                   ? [
                       ["needed", "Needed"],
                       ["sent", "Sent"],
+                      ["viewed", "Viewed"],
                       ["completed", "Completed"],
                       ["missing", "Missing"],
                     ]
                   : [
                       ["needed", "Needed"],
                       ["uploaded", "Uploaded"],
-                      ["pending review", "Pending Review"],
+                      ["pending_review", "Pending Review"],
                       ["approved", "Approved"],
                       ["rejected", "Rejected"],
                     ];
@@ -807,38 +846,40 @@ export default function TransactionDetail() {
                   <div className="placeholder-row" key={documentType}>
                     <FileText size={16} />
                     <div>
-                      <span>{document?.documentName || documentType}</span>
+                      <span>{documentRecord?.documentName || documentType}</span>
                       <small>
                         {workflowDocument
-                          ? document?.workflowName || "Workflow document"
-                          : document?.fileName || "No file uploaded"}
+                          ? documentRecord?.workflowName || "Workflow document"
+                          : documentRecord?.fileName ||
+                            documentRecord?.doorScaleFileId ||
+                            "No file uploaded"}
                       </small>
                       {!workflowDocument ? (
                         <small>
-                          {document?.uploadedAt
-                            ? `Uploaded ${formatDate(document.uploadedAt)}`
+                          {documentRecord?.uploadedAt
+                            ? `Uploaded ${formatDate(documentRecord.uploadedAt)}`
                             : "No upload date"}
                         </small>
                       ) : null}
                     </div>
                     <Badge
                       variant={documentStatusVariant(
-                        document?.status || "Needed",
+                        documentRecord?.status || "Needed",
                       )}
                     >
-                      {formatDocumentStatus(document?.status)}
+                      {formatDocumentStatus(documentRecord?.status)}
                     </Badge>
                     <select
                       aria-label={`Update ${documentType} status`}
                       onChange={(event) =>
-                        document
+                        documentRecord
                           ? void handleDocumentStatusChange(
-                              document.id,
+                              documentRecord.id,
                               event.target.value,
                             )
                           : undefined
                       }
-                      value={normalizeDocumentStatus(document?.status)}
+                      value={normalizeDocumentStatus(documentRecord?.status)}
                     >
                       {statusOptions.map(([value, label]) => (
                         <option key={value} value={value}>
@@ -848,10 +889,13 @@ export default function TransactionDetail() {
                     </select>
                     {!workflowDocument ? (
                       <div className="document-actions">
-                        {document?.doorScaleFileId ? (
+                        {documentRecord?.doorScaleFileId ? (
                           <a
                             className="button button--ghost"
-                            href={buildDocumentViewLink(document.id, transactionId)}
+                            href={buildDocumentViewLink(
+                              documentRecord.id,
+                              transactionId,
+                            )}
                             rel="noreferrer"
                             target="_blank"
                           >
@@ -860,34 +904,44 @@ export default function TransactionDetail() {
                         ) : null}
                         <input
                           aria-label={`Upload ${documentType}`}
+                          id={inputId}
                           style={{ display: "none" }}
                           onChange={(event) =>
-                            document
+                            documentRecord
                               ? void handleDocumentUpload(
-                                  document.id,
-                                  document.documentType || documentType,
+                                  documentRecord.id,
+                                  documentRecord.documentType || documentType,
                                   event,
                                 )
                               : undefined
                           }
-                          ref={(element) => {
-                            if (document) fileInputRefs.current[document.id] = element;
-                          }}
                           type="file"
                         />
                         <Button
+                          disabled={
+                            !activeLocationId ||
+                            !transactionId ||
+                            !documentRecord?.id
+                          }
                           onClick={() => {
-                            if (!document) return;
-                            console.log("Upload document clicked", document.id);
-                            fileInputRefs.current[document.id]?.click();
+                            if (!documentRecord) return;
+                            console.log(
+                              "Upload document clicked",
+                              documentRecord.id,
+                            );
+                            setLastDocumentAction(
+                              `Upload button clicked: ${documentRecord.id}`,
+                            );
+                            setLastDocumentResponse("Opening file picker...");
+                            window.document.getElementById(inputId)?.click();
                           }}
                           type="button"
                           variant="secondary"
                         >
                           <Upload size={15} />
-                          {uploadingDocumentId === document?.id
+                          {uploadingDocumentId === documentRecord?.id
                             ? "Uploading..."
-                            : document?.fileName
+                            : documentRecord?.doorScaleFileId
                               ? "Replace File"
                               : "Upload Document"}
                         </Button>

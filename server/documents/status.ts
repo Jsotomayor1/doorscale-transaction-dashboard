@@ -6,17 +6,25 @@ type StatusBody = {
   document_id?: string;
   documentId?: string;
   status?: string;
+  transaction_id?: string;
+  transactionId?: string;
 };
 
 const ALLOWED_STATUSES = new Set([
   "needed",
   "sent",
+  "viewed",
   "completed",
   "uploaded",
-  "pending review",
+  "pending_review",
   "approved",
   "rejected",
+  "missing",
 ]);
+
+function normalizeStatus(status = "") {
+  return status.trim().toLowerCase().replace(/\s+/g, "_");
+}
 
 function getSupabaseServiceClient() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -45,7 +53,8 @@ export default async function handler(
   try {
     const body = (request.body ?? {}) as StatusBody;
     const documentId = (body.document_id || body.documentId || "").trim();
-    const status = (body.status || "").trim().toLowerCase();
+    const transactionId = (body.transaction_id || body.transactionId || "").trim();
+    const status = normalizeStatus(body.status);
 
     if (!documentId || !ALLOWED_STATUSES.has(status)) {
       return response.status(400).json({
@@ -60,14 +69,28 @@ export default async function handler(
       supabase,
       "/api/documents/status",
     );
+    console.log("DoorScale document action received:", {
+      activeLocationId: activeLocation.activeLocationId,
+      action: "updateStatus",
+      document_id: documentId,
+      routeName: "/api/documents/status",
+      status,
+      transaction_id: transactionId || null,
+    });
 
-    const { data: updatedDocument, error } = await supabase
+    let query = supabase
       .from("transaction_documents")
       .update({ status })
       .eq("id", documentId)
-      .eq("location_id", activeLocation.activeLocationId)
+      .eq("location_id", activeLocation.activeLocationId);
+
+    if (transactionId) {
+      query = query.eq("transaction_id", transactionId);
+    }
+
+    const { data: updatedDocument, error } = await query
       .select(
-        "id, transaction_id, document_type, document_name, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at",
+        "id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
       )
       .single();
 
@@ -76,6 +99,7 @@ export default async function handler(
         activeLocationId: activeLocation.activeLocationId,
         documentId,
         error,
+        transactionId: transactionId || null,
       });
       return response.status(500).json({
         message: "Unable to update document status.",
@@ -88,6 +112,8 @@ export default async function handler(
       documentId,
       routeName: "/api/documents/status",
       status,
+      transactionId: transactionId || null,
+      updatedDocumentId: updatedDocument?.id ?? null,
     });
 
     return response.status(200).json({

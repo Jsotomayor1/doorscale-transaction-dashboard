@@ -179,6 +179,15 @@ export default async function handler(
     const documentType = fields.documentType?.trim();
     const file = files.find((currentFile) => currentFile.name === "file");
 
+    console.log("DoorScale document action received:", {
+      activeLocationId: activeLocation.activeLocationId,
+      action: "upload",
+      document_id: documentId || null,
+      routeName: "/api/documents/upload",
+      transaction_id: transactionId || null,
+      uploadFileName: file?.filename || null,
+    });
+
     if (!documentId || !transactionId || !documentType || !file?.data.length) {
       return response.status(400).json({
         message: "Choose a document file to upload.",
@@ -300,7 +309,7 @@ export default async function handler(
       .eq("transaction_id", transactionId)
       .eq("location_id", activeLocation.activeLocationId)
       .select(
-        "id, transaction_id, document_type, document_name, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at",
+        "id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
       )
       .single();
 
@@ -316,6 +325,14 @@ export default async function handler(
         ok: false,
       });
     }
+
+    console.log("DoorScale document metadata update result:", {
+      activeLocationId: activeLocation.activeLocationId,
+      documentId,
+      status: updatedDocument?.status ?? null,
+      transactionId,
+      updatedDocumentId: updatedDocument?.id ?? null,
+    });
 
     const optionalMetadata = {
       file_name: fileName,

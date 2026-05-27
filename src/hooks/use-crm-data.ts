@@ -61,6 +61,7 @@ export type UpdateTaskDueDateTimeInput = {
 export type UpdateDocumentStatusInput = {
   documentId: string;
   status: DocumentStatus;
+  transactionId: string;
 };
 
 export type UploadDocumentInput = {
@@ -214,6 +215,7 @@ export type TransactionDocument = {
 export type DocumentStatus =
   | "needed"
   | "sent"
+  | "viewed"
   | "completed"
   | "uploaded"
   | "pending_review"
@@ -238,7 +240,10 @@ type TransactionWriteResponse = {
 type DocumentUploadResponse = {
   document?: Partial<TransactionDocument> & {
     document_id?: string;
+    document_name?: string;
     document_type?: string;
+    delivery_type?: string;
+    doorscale_file_id?: string;
     file_name?: string;
     file_path?: string;
     file_url?: string;
@@ -252,6 +257,10 @@ type DocumentUploadResponse = {
 
 type DocumentStatusResponse = {
   document?: Partial<TransactionDocument> & {
+    document_name?: string;
+    document_type?: string;
+    delivery_type?: string;
+    doorscale_file_id?: string;
     id?: string;
     status?: string;
     uploaded_at?: string;
@@ -367,6 +376,7 @@ function normalizeDocumentStatusValue(status = "needed"): DocumentStatus {
 
   if (normalizedStatus === "completed") return "completed";
   if (normalizedStatus === "sent") return "sent";
+  if (normalizedStatus === "viewed") return "viewed";
   if (normalizedStatus === "uploaded") return "uploaded";
   if (normalizedStatus === "pending_review") return "pending_review";
   if (normalizedStatus === "approved") return "approved";
@@ -379,6 +389,7 @@ function emptyDocumentCounts(): DocumentStatusCounts {
   return {
     needed: 0,
     sent: 0,
+    viewed: 0,
     completed: 0,
     uploaded: 0,
     pending_review: 0,
@@ -1590,7 +1601,7 @@ export function useCrmData() {
   );
 
   const updateDocumentStatus = useCallback(
-    async ({ documentId, status }: UpdateDocumentStatusInput) => {
+    async ({ documentId, status, transactionId }: UpdateDocumentStatusInput) => {
       if (isDemoMode()) {
         setData((currentData) => ({
           ...currentData,
@@ -1598,7 +1609,7 @@ export function useCrmData() {
             document.id === documentId ? { ...document, status } : document,
           ),
         }));
-        return;
+        return { message: "Document status updated.", status: 200 };
       }
 
       const client = getSupabaseClient();
@@ -1607,6 +1618,19 @@ export function useCrmData() {
         throw new Error("DoorScale connection is not configured.");
       }
       const locationId = activeLocationId || (await getActiveLocationId());
+      const normalizedStatus = normalizeDocumentStatusValue(status);
+
+      setData((currentData) => ({
+        ...currentData,
+        documents: currentData.documents.map((document) =>
+          document.id === documentId
+            ? {
+                ...document,
+                status: normalizedStatus,
+              }
+            : document,
+        ),
+      }));
 
       const response = await fetch("/api/documents", {
         method: "POST",
@@ -1618,12 +1642,14 @@ export function useCrmData() {
           action: "updateStatus",
           active_location_id: locationId,
           document_id: documentId,
-          status,
+          status: normalizedStatus,
+          transaction_id: transactionId,
         }),
       });
       const result = (await response.json().catch(() => ({}))) as DocumentStatusResponse;
 
       if (!response.ok || result.ok === false) {
+        await refreshData();
         throw new Error(result.message || "Unable to update document status.");
       }
 
@@ -1635,8 +1661,24 @@ export function useCrmData() {
               ? {
                   ...document,
                   status: normalizeDocumentStatusValue(
-                    result.document?.status ?? status,
+                    result.document?.status ?? normalizedStatus,
                   ),
+                  deliveryType:
+                    result.document?.deliveryType ||
+                    result.document?.delivery_type ||
+                    document.deliveryType,
+                  documentName:
+                    result.document?.documentName ||
+                    result.document?.document_name ||
+                    document.documentName,
+                  documentType:
+                    result.document?.documentType ||
+                    result.document?.document_type ||
+                    document.documentType,
+                  doorScaleFileId:
+                    result.document?.doorScaleFileId ||
+                    result.document?.doorscale_file_id ||
+                    document.doorScaleFileId,
                   uploadedAt:
                     result.document?.uploadedAt ||
                     result.document?.uploaded_at ||
@@ -1645,10 +1687,17 @@ export function useCrmData() {
               : document,
           ),
         }));
-        return;
+        return {
+          message: result.message || "Document status updated.",
+          status: response.status,
+        };
       }
 
       await refreshData();
+      return {
+        message: result.message || "Document status updated.",
+        status: response.status,
+      };
     },
     [activeLocationId, refreshData],
   );
@@ -1671,7 +1720,7 @@ export function useCrmData() {
               : document,
           ),
         }));
-        return;
+        return { message: "Document uploaded.", status: 200 };
       }
 
       const locationId = activeLocationId || (await getActiveLocationId());
@@ -1714,6 +1763,7 @@ export function useCrmData() {
                   ...document,
                   doorScaleFileId:
                     result.document?.doorScaleFileId ||
+                    result.document?.doorscale_file_id ||
                     result.document?.file_path ||
                     result.document?.filePath ||
                     document.doorScaleFileId,
@@ -1740,10 +1790,17 @@ export function useCrmData() {
               : document,
           ),
         }));
-        return;
+        return {
+          message: result.message || "Document uploaded.",
+          status: response.status,
+        };
       }
 
       await refreshData();
+      return {
+        message: result.message || "Document uploaded.",
+        status: response.status,
+      };
     },
     [activeLocationId, refreshData],
   );
