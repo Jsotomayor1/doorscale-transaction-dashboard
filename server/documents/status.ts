@@ -10,6 +10,8 @@ type StatusBody = {
 
 const ALLOWED_STATUSES = new Set([
   "needed",
+  "sent",
+  "completed",
   "uploaded",
   "pending review",
   "approved",

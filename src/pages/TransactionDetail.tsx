@@ -101,19 +101,26 @@ function getSyncVariant(syncStatus = "synced") {
 function documentStatusVariant(status: string) {
   const normalizedStatus = normalizeDocumentStatus(status);
 
-  if (normalizedStatus === "uploaded" || normalizedStatus === "approved") {
+  if (
+    normalizedStatus === "uploaded" ||
+    normalizedStatus === "approved" ||
+    normalizedStatus === "completed"
+  ) {
     return "success";
   }
   if (normalizedStatus === "rejected" || normalizedStatus === "missing") {
     return "danger";
   }
   if (normalizedStatus === "pending review") return "default";
+  if (normalizedStatus === "sent") return "default";
   return "warning";
 }
 
 function normalizeDocumentStatus(status = "Needed") {
   const normalizedStatus = status.trim().toLowerCase().replace(/_/g, " ");
 
+  if (normalizedStatus === "completed") return "completed";
+  if (normalizedStatus === "sent") return "sent";
   if (normalizedStatus === "uploaded") return "uploaded";
   if (normalizedStatus === "pending review") return "pending review";
   if (normalizedStatus === "approved") return "approved";
@@ -125,12 +132,18 @@ function normalizeDocumentStatus(status = "Needed") {
 function formatDocumentStatus(status = "Needed") {
   const normalizedStatus = normalizeDocumentStatus(status);
 
+  if (normalizedStatus === "completed") return "Completed";
+  if (normalizedStatus === "sent") return "Sent";
   if (normalizedStatus === "uploaded") return "Uploaded";
   if (normalizedStatus === "pending review") return "Pending Review";
   if (normalizedStatus === "approved") return "Approved";
   if (normalizedStatus === "rejected") return "Rejected";
   if (normalizedStatus === "missing") return "Missing";
   return "Needed";
+}
+
+function isWorkflowDocument(deliveryType = "") {
+  return deliveryType === "workflow";
 }
 
 function buildDocumentViewLink(documentId: string, transactionId: string) {
@@ -774,17 +787,39 @@ export default function TransactionDetail() {
             <p className="documents-helper">Document upload UI active</p>
             <div className="placeholder-list">
               {documentTrackingRows.map(({ document, documentType }) => {
+                const workflowDocument = isWorkflowDocument(document?.deliveryType);
+                const statusOptions = workflowDocument
+                  ? [
+                      ["needed", "Needed"],
+                      ["sent", "Sent"],
+                      ["completed", "Completed"],
+                      ["missing", "Missing"],
+                    ]
+                  : [
+                      ["needed", "Needed"],
+                      ["uploaded", "Uploaded"],
+                      ["pending review", "Pending Review"],
+                      ["approved", "Approved"],
+                      ["rejected", "Rejected"],
+                    ];
+
                 return (
                   <div className="placeholder-row" key={documentType}>
                     <FileText size={16} />
                     <div>
                       <span>{document?.documentName || documentType}</span>
-                      <small>{document?.fileName || "No file uploaded"}</small>
                       <small>
-                        {document?.uploadedAt
-                          ? `Uploaded ${formatDate(document.uploadedAt)}`
-                          : "No upload date"}
+                        {workflowDocument
+                          ? document?.workflowName || "Workflow document"
+                          : document?.fileName || "No file uploaded"}
                       </small>
+                      {!workflowDocument ? (
+                        <small>
+                          {document?.uploadedAt
+                            ? `Uploaded ${formatDate(document.uploadedAt)}`
+                            : "No upload date"}
+                        </small>
+                      ) : null}
                     </div>
                     <Badge
                       variant={documentStatusVariant(
@@ -805,57 +840,63 @@ export default function TransactionDetail() {
                       }
                       value={normalizeDocumentStatus(document?.status)}
                     >
-                      <option value="needed">Needed</option>
-                      <option value="uploaded">Uploaded</option>
-                      <option value="pending review">Pending Review</option>
-                      <option value="approved">Approved</option>
-                      <option value="rejected">Rejected</option>
+                      {statusOptions.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
                     </select>
-                    <div className="document-actions">
-                      {document?.doorScaleFileId ? (
-                        <a
-                          className="button button--ghost"
-                          href={buildDocumentViewLink(document.id, transactionId)}
-                          rel="noreferrer"
-                          target="_blank"
+                    {!workflowDocument ? (
+                      <div className="document-actions">
+                        {document?.doorScaleFileId ? (
+                          <a
+                            className="button button--ghost"
+                            href={buildDocumentViewLink(document.id, transactionId)}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            View File
+                          </a>
+                        ) : null}
+                        <input
+                          aria-label={`Upload ${documentType}`}
+                          style={{ display: "none" }}
+                          onChange={(event) =>
+                            document
+                              ? void handleDocumentUpload(
+                                  document.id,
+                                  document.documentType || documentType,
+                                  event,
+                                )
+                              : undefined
+                          }
+                          ref={(element) => {
+                            if (document) fileInputRefs.current[document.id] = element;
+                          }}
+                          type="file"
+                        />
+                        <Button
+                          onClick={() => {
+                            if (!document) return;
+                            console.log("Upload document clicked", document.id);
+                            fileInputRefs.current[document.id]?.click();
+                          }}
+                          type="button"
+                          variant="secondary"
                         >
-                          View File
-                        </a>
-                      ) : null}
-                      <input
-                        aria-label={`Upload ${documentType}`}
-                        style={{ display: "none" }}
-                        onChange={(event) =>
-                          document
-                            ? void handleDocumentUpload(
-                                document.id,
-                                document.documentType || documentType,
-                                event,
-                              )
-                            : undefined
-                        }
-                        ref={(element) => {
-                          if (document) fileInputRefs.current[document.id] = element;
-                        }}
-                        type="file"
-                      />
-                      <Button
-                        onClick={() => {
-                          if (!document) return;
-                          console.log("Upload document clicked", document.id);
-                          fileInputRefs.current[document.id]?.click();
-                        }}
-                        type="button"
-                        variant="secondary"
-                      >
-                        <Upload size={15} />
-                        {uploadingDocumentId === document?.id
-                          ? "Uploading..."
-                          : document?.fileName
-                            ? "Replace File"
-                            : "Upload Document"}
-                      </Button>
-                    </div>
+                          <Upload size={15} />
+                          {uploadingDocumentId === document?.id
+                            ? "Uploading..."
+                            : document?.fileName
+                              ? "Replace File"
+                              : "Upload Document"}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="document-actions">
+                        <Badge variant="default">Workflow</Badge>
+                      </div>
+                    )}
                   </div>
                 );
               })}

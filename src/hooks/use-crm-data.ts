@@ -195,6 +195,7 @@ export type TransactionDocument = {
   transactionId: string;
   documentType: string;
   documentName: string;
+  deliveryType: "workflow" | "manual_upload" | string;
   doorScaleFileId: string;
   doorScaleContactId: string;
   fileName: string;
@@ -205,11 +206,15 @@ export type TransactionDocument = {
   status: string;
   uploadedAt: string;
   uploadedBy: string;
+  workflowName: string;
+  workflowTriggerTag: string;
   createdAt: string;
 };
 
 export type DocumentStatus =
   | "needed"
+  | "sent"
+  | "completed"
   | "uploaded"
   | "pending_review"
   | "approved"
@@ -307,6 +312,7 @@ type SupabaseTransactionDocument = {
   transaction_id: string | null;
   document_type: string | null;
   document_name: string | null;
+  delivery_type?: string | null;
   doorscale_file_id: string | null;
   doorscale_contact_id: string | null;
   file_name?: string | null;
@@ -317,6 +323,8 @@ type SupabaseTransactionDocument = {
   status: string | null;
   uploaded_at: string | null;
   uploaded_by?: string | null;
+  workflow_name?: string | null;
+  workflow_trigger_tag?: string | null;
   created_at: string | null;
 };
 
@@ -331,8 +339,12 @@ type SupabaseTaskTemplate = {
 
 type SupabaseDocumentTemplate = {
   id: string;
+  delivery_type?: string | null;
   location_id?: string | null;
+  document_name?: string | null;
   document_type: string | null;
+  workflow_name?: string | null;
+  workflow_trigger_tag?: string | null;
   sort_order: number | null;
 };
 
@@ -354,6 +366,8 @@ type CrmDataState = {
 function normalizeDocumentStatusValue(status = "needed"): DocumentStatus {
   const normalizedStatus = status.trim().toLowerCase().replace(/\s+/g, "_");
 
+  if (normalizedStatus === "completed") return "completed";
+  if (normalizedStatus === "sent") return "sent";
   if (normalizedStatus === "uploaded") return "uploaded";
   if (normalizedStatus === "pending_review") return "pending_review";
   if (normalizedStatus === "approved") return "approved";
@@ -365,6 +379,8 @@ function normalizeDocumentStatusValue(status = "needed"): DocumentStatus {
 function emptyDocumentCounts(): DocumentStatusCounts {
   return {
     needed: 0,
+    sent: 0,
+    completed: 0,
     uploaded: 0,
     pending_review: 0,
     approved: 0,
@@ -551,11 +567,14 @@ function mapSupabaseData(
     transactionId: document.transaction_id ?? "",
     documentType: document.document_type ?? "",
     documentName: document.document_name ?? "",
+    deliveryType: document.delivery_type ?? "manual_upload",
     doorScaleFileId: document.doorscale_file_id ?? "",
     doorScaleContactId: document.doorscale_contact_id ?? "",
     status: normalizeDocumentStatusValue(document.status ?? undefined),
     uploadedAt: document.uploaded_at ?? "",
     uploadedBy: document.uploaded_by ?? "",
+    workflowName: document.workflow_name ?? "",
+    workflowTriggerTag: document.workflow_trigger_tag ?? "",
     createdAt: document.created_at ?? "",
   }));
   const documentCountsByTransaction = documents.reduce<
@@ -734,7 +753,7 @@ async function fetchCrmData(
     client
       .from("transaction_documents")
       .select(
-        "id, transaction_id, document_type, document_name, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at",
+        "id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
       )
       .eq("location_id", activeLocationId)
       .order("created_at", { ascending: false }),
@@ -855,7 +874,9 @@ async function generateDocumentChecklist(
 ) {
   const { data: templates, error: templateError } = await client
     .from("document_templates")
-    .select("id, location_id, document_type, sort_order")
+    .select(
+      "id, location_id, document_type, document_name, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
+    )
     .in("location_id", [activeLocationId, "demo-location", "global"])
     .eq("transaction_type", transactionType)
     .eq("stage", stage)
@@ -903,7 +924,10 @@ async function generateDocumentChecklist(
       location_id: activeLocationId,
       transaction_id: transactionId,
       document_type: template.document_type,
-      document_name: template.document_type,
+      document_name: template.document_name || template.document_type,
+      delivery_type: template.delivery_type || "manual_upload",
+      workflow_trigger_tag: template.workflow_trigger_tag || null,
+      workflow_name: template.workflow_name || null,
       status: "needed",
     }));
 

@@ -1186,8 +1186,12 @@ function dedupeTasksByExternalId(tasks: TaskUpsertPayload[]) {
 }
 
 type DocumentTemplate = {
+  delivery_type?: string | null;
+  document_name?: string | null;
   document_type: string | null;
   location_id?: string | null;
+  workflow_name?: string | null;
+  workflow_trigger_tag?: string | null;
 };
 
 type ExistingDocument = {
@@ -1207,7 +1211,9 @@ async function generateDocumentChecklist(
 
   const { data: templates, error: templateError } = await db
     .from("document_templates")
-    .select("document_type, location_id")
+    .select(
+      "document_type, document_name, delivery_type, workflow_trigger_tag, workflow_name, location_id",
+    )
     .in("location_id", [locationId, "demo-location", "global"])
     .eq("transaction_type", transaction.transaction_type)
     .eq("stage", transaction.stage);
@@ -1257,7 +1263,10 @@ async function generateDocumentChecklist(
       location_id: locationId,
       transaction_id: transaction.id,
       document_type: template.document_type,
-      document_name: template.document_type,
+      document_name: template.document_name || template.document_type,
+      delivery_type: template.delivery_type || "manual_upload",
+      workflow_trigger_tag: template.workflow_trigger_tag || null,
+      workflow_name: template.workflow_name || null,
       status: "needed",
     }));
 
