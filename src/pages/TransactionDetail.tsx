@@ -25,6 +25,7 @@ import {
 import {
   TRANSACTION_STAGES,
   type DocumentStatus,
+  type TransactionDocument,
   type TransactionStage,
   useCRMData,
 } from "@/hooks/use-crm-data";
@@ -352,15 +353,18 @@ export default function TransactionDetail() {
     }
   }
 
-  async function handleDocumentStatusChange(documentId: string, status: string) {
+  async function handleDocumentStatusChange(
+    documentRecord: TransactionDocument,
+    status: string,
+  ) {
     setDetailMessage("");
     setDetailError("");
-    setLastDocumentAction(`Status change: ${documentId} -> ${status}`);
+    setLastDocumentAction(`backend request started status ${documentRecord.id}`);
     setLastDocumentResponse("Saving status...");
 
     try {
       const result = await data.updateDocumentStatus({
-        documentId,
+        documentId: documentRecord.id,
         status: status as DocumentStatus,
         transactionId,
       });
@@ -393,7 +397,7 @@ export default function TransactionDetail() {
     console.log("Selected document file:", file.name);
     setDetailMessage("");
     setDetailError("");
-    setLastDocumentAction(`Upload: ${documentId} (${file.name})`);
+    setLastDocumentAction(`backend request started upload ${documentId}`);
     setLastDocumentResponse("Uploading document...");
     setUploadingDocumentId(documentId);
 
@@ -416,6 +420,20 @@ export default function TransactionDetail() {
     } finally {
       setUploadingDocumentId("");
     }
+  }
+
+  function handleDocumentFileSelected(
+    event: ChangeEvent<HTMLInputElement>,
+    documentRecord: TransactionDocument,
+  ) {
+    const fileName = event.target.files?.[0]?.name || "none";
+    setLastDocumentAction(`file selected ${documentRecord.id}`);
+    setLastDocumentResponse(`Selected file: ${fileName}`);
+    void handleDocumentUpload(
+      documentRecord.id,
+      documentRecord.documentType,
+      event,
+    );
   }
 
   const transactionNeedsSync = ["pending_sync", "sync_error"].includes(
@@ -820,12 +838,18 @@ export default function TransactionDetail() {
             </div>
             <div className="placeholder-list">
               {documentTrackingRows.map(({ document: documentRecord, documentType }) => {
+                console.log("Document row render", {
+                  activeLocationId,
+                  documentId: documentRecord?.id || null,
+                  documentStatus: documentRecord?.status || null,
+                  transactionId,
+                });
                 const workflowDocument = isWorkflowDocument(
                   documentRecord?.deliveryType,
                 );
                 const inputId = documentRecord
-                  ? `document-upload-${documentRecord.id}`
-                  : `document-upload-${normalizeDocumentType(documentType)}`;
+                  ? `file-${documentRecord.id}`
+                  : `file-${normalizeDocumentType(documentType)}`;
                 const statusOptions = workflowDocument
                   ? [
                       ["needed", "Needed"],
@@ -871,14 +895,25 @@ export default function TransactionDetail() {
                     </Badge>
                     <select
                       aria-label={`Update ${documentType} status`}
-                      onChange={(event) =>
-                        documentRecord
-                          ? void handleDocumentStatusChange(
-                              documentRecord.id,
-                              event.target.value,
-                            )
-                          : undefined
-                      }
+                      onChange={(event) => {
+                        if (!documentRecord) {
+                          setLastDocumentAction(
+                            `status changed missing document ${documentType}`,
+                          );
+                          setLastDocumentResponse(
+                            "Document checklist item is not ready yet.",
+                          );
+                          return;
+                        }
+
+                        setLastDocumentAction(
+                          `status changed ${documentRecord.id} ${event.target.value}`,
+                        );
+                        void handleDocumentStatusChange(
+                          documentRecord,
+                          event.target.value,
+                        );
+                      }}
                       value={normalizeDocumentStatus(documentRecord?.status)}
                     >
                       {statusOptions.map(([value, label]) => (
@@ -906,37 +941,44 @@ export default function TransactionDetail() {
                           aria-label={`Upload ${documentType}`}
                           id={inputId}
                           style={{ display: "none" }}
-                          onChange={(event) =>
-                            documentRecord
-                              ? void handleDocumentUpload(
-                                  documentRecord.id,
-                                  documentRecord.documentType || documentType,
-                                  event,
-                                )
-                              : undefined
-                          }
+                          onChange={(event) => {
+                            if (!documentRecord) {
+                              setLastDocumentAction(
+                                `file selected missing document ${documentType}`,
+                              );
+                              setLastDocumentResponse(
+                                "Document checklist item is not ready yet.",
+                              );
+                              return;
+                            }
+
+                            handleDocumentFileSelected(event, documentRecord);
+                          }}
                           type="file"
                         />
-                        <Button
-                          disabled={
-                            !activeLocationId ||
-                            !transactionId ||
-                            !documentRecord?.id
-                          }
+                        <button
+                          className="button button--secondary"
                           onClick={() => {
-                            if (!documentRecord) return;
-                            console.log(
-                              "Upload document clicked",
-                              documentRecord.id,
-                            );
+                            if (!documentRecord) {
+                              setLastDocumentAction(
+                                `upload clicked missing document ${documentType}`,
+                              );
+                              setLastDocumentResponse(
+                                "Document checklist item is not ready yet.",
+                              );
+                              return;
+                            }
+
                             setLastDocumentAction(
-                              `Upload button clicked: ${documentRecord.id}`,
+                              `upload clicked ${documentRecord.id}`,
                             );
                             setLastDocumentResponse("Opening file picker...");
-                            window.document.getElementById(inputId)?.click();
+                            console.log("upload clicked", documentRecord.id);
+                            window.document
+                              .getElementById(`file-${documentRecord.id}`)
+                              ?.click();
                           }}
                           type="button"
-                          variant="secondary"
                         >
                           <Upload size={15} />
                           {uploadingDocumentId === documentRecord?.id
@@ -944,7 +986,7 @@ export default function TransactionDetail() {
                             : documentRecord?.doorScaleFileId
                               ? "Replace File"
                               : "Upload Document"}
-                        </Button>
+                        </button>
                       </div>
                     ) : (
                       <div className="document-actions">
