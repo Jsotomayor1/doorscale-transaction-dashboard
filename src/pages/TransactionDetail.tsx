@@ -35,18 +35,6 @@ import {
 } from "@/lib/active-location";
 import { formatCurrency } from "@/lib/utils";
 
-const documentRows = [
-  "Executed Contract",
-  "Flood Disclosure",
-  "Inspection Report",
-  "Closing Disclosure",
-  "Commission Documents",
-];
-
-function normalizeDocumentType(documentType = "") {
-  return documentType.trim().toLowerCase();
-}
-
 const initialTaskForm = {
   assignedTo: "",
   dueDate: "",
@@ -259,20 +247,16 @@ export default function TransactionDetail() {
       String(task.relatedOpportunityId) === transactionId ||
       String(task.transactionId) === transactionId,
   );
-  const documentsByType = new Map(
-    data.documents
-      .filter((document) => document.transactionId === transactionId)
-      .map((document) => [normalizeDocumentType(document.documentType), document]),
+  const transactionDocuments = data.documents.filter(
+    (document) =>
+      document.transactionId === transactionId &&
+      document.locationId === activeLocationId &&
+      Boolean(document.id),
   );
-  const documentTrackingRows = documentRows.map((documentType) => {
-    const document =
-      documentsByType.get(normalizeDocumentType(documentType)) ?? null;
-
-    return {
-      document,
-      documentType,
-    };
-  });
+  const documentTrackingRows = transactionDocuments.map((document) => ({
+    document,
+    documentType: document.documentName || document.documentType,
+  }));
 
   async function handleStageChange(stage: TransactionStage) {
     setStageMessage("");
@@ -832,11 +816,14 @@ export default function TransactionDetail() {
               <strong>Document debug</strong>
               <span>activeLocationId: {activeLocationId || "missing"}</span>
               <span>transactionId: {transactionId || "missing"}</span>
-              <span>document count: {data.documents.length}</span>
+              <span>document count: {transactionDocuments.length}</span>
               <span>last document action: {lastDocumentAction}</span>
               <span>last response: {lastDocumentResponse}</span>
             </div>
             <div className="placeholder-list">
+              {!documentTrackingRows.length ? (
+                <div className="empty-state">Preparing checklist...</div>
+              ) : null}
               {documentTrackingRows.map(({ document: documentRecord, documentType }) => {
                 console.log("Document row render", {
                   activeLocationId,
@@ -847,9 +834,7 @@ export default function TransactionDetail() {
                 const workflowDocument = isWorkflowDocument(
                   documentRecord?.deliveryType,
                 );
-                const inputId = documentRecord
-                  ? `file-${documentRecord.id}`
-                  : `file-${normalizeDocumentType(documentType)}`;
+                const inputId = `file-${documentRecord.id}`;
                 const statusOptions = workflowDocument
                   ? [
                       ["needed", "Needed"],
@@ -870,17 +855,20 @@ export default function TransactionDetail() {
                   <div className="placeholder-row" key={documentType}>
                     <FileText size={16} />
                     <div>
-                      <span>{documentRecord?.documentName || documentType}</span>
+                      <span>{documentRecord.documentName || documentType}</span>
                       <small>
                         {workflowDocument
-                          ? documentRecord?.workflowName || "Workflow document"
-                          : documentRecord?.fileName ||
-                            documentRecord?.doorScaleFileId ||
+                          ? documentRecord.workflowName || "Workflow document"
+                          : documentRecord.fileName ||
+                            documentRecord.doorScaleFileId ||
                             "No file uploaded"}
                       </small>
+                      <small>Document id: {documentRecord.id}</small>
+                      <small>Location id: {documentRecord.locationId}</small>
+                      <small>Transaction id: {documentRecord.transactionId}</small>
                       {!workflowDocument ? (
                         <small>
-                          {documentRecord?.uploadedAt
+                          {documentRecord.uploadedAt
                             ? `Uploaded ${formatDate(documentRecord.uploadedAt)}`
                             : "No upload date"}
                         </small>
@@ -888,24 +876,14 @@ export default function TransactionDetail() {
                     </div>
                     <Badge
                       variant={documentStatusVariant(
-                        documentRecord?.status || "Needed",
+                        documentRecord.status || "Needed",
                       )}
                     >
-                      {formatDocumentStatus(documentRecord?.status)}
+                      {formatDocumentStatus(documentRecord.status)}
                     </Badge>
                     <select
                       aria-label={`Update ${documentType} status`}
                       onChange={(event) => {
-                        if (!documentRecord) {
-                          setLastDocumentAction(
-                            `status changed missing document ${documentType}`,
-                          );
-                          setLastDocumentResponse(
-                            "Document checklist item is not ready yet.",
-                          );
-                          return;
-                        }
-
                         setLastDocumentAction(
                           `status changed ${documentRecord.id} ${event.target.value}`,
                         );
@@ -914,7 +892,7 @@ export default function TransactionDetail() {
                           event.target.value,
                         );
                       }}
-                      value={normalizeDocumentStatus(documentRecord?.status)}
+                      value={normalizeDocumentStatus(documentRecord.status)}
                     >
                       {statusOptions.map(([value, label]) => (
                         <option key={value} value={value}>
@@ -924,7 +902,7 @@ export default function TransactionDetail() {
                     </select>
                     {!workflowDocument ? (
                       <div className="document-actions">
-                        {documentRecord?.doorScaleFileId ? (
+                        {documentRecord.doorScaleFileId ? (
                           <a
                             className="button button--ghost"
                             href={buildDocumentViewLink(
@@ -942,16 +920,6 @@ export default function TransactionDetail() {
                           id={inputId}
                           style={{ display: "none" }}
                           onChange={(event) => {
-                            if (!documentRecord) {
-                              setLastDocumentAction(
-                                `file selected missing document ${documentType}`,
-                              );
-                              setLastDocumentResponse(
-                                "Document checklist item is not ready yet.",
-                              );
-                              return;
-                            }
-
                             handleDocumentFileSelected(event, documentRecord);
                           }}
                           type="file"
@@ -959,16 +927,6 @@ export default function TransactionDetail() {
                         <button
                           className="button button--secondary"
                           onClick={() => {
-                            if (!documentRecord) {
-                              setLastDocumentAction(
-                                `upload clicked missing document ${documentType}`,
-                              );
-                              setLastDocumentResponse(
-                                "Document checklist item is not ready yet.",
-                              );
-                              return;
-                            }
-
                             setLastDocumentAction(
                               `upload clicked ${documentRecord.id}`,
                             );
@@ -981,9 +939,9 @@ export default function TransactionDetail() {
                           type="button"
                         >
                           <Upload size={15} />
-                          {uploadingDocumentId === documentRecord?.id
+                          {uploadingDocumentId === documentRecord.id
                             ? "Uploading..."
-                            : documentRecord?.doorScaleFileId
+                            : documentRecord.doorScaleFileId
                               ? "Replace File"
                               : "Upload Document"}
                         </button>

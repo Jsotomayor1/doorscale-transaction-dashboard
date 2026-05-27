@@ -193,6 +193,7 @@ export type DashboardTask = {
 
 export type TransactionDocument = {
   id: string;
+  locationId: string;
   transactionId: string;
   documentType: string;
   documentName: string;
@@ -318,6 +319,7 @@ type SupabaseTask = {
 
 type SupabaseTransactionDocument = {
   id: string;
+  location_id?: string | null;
   transaction_id: string | null;
   document_type: string | null;
   document_name: string | null;
@@ -351,6 +353,9 @@ type SupabaseDocumentTemplate = {
   delivery_type?: string | null;
   location_id?: string | null;
   document_type: string | null;
+  stage?: string | null;
+  stage_name?: string | null;
+  transaction_type?: string | null;
   workflow_name?: string | null;
   workflow_trigger_tag?: string | null;
   sort_order: number | null;
@@ -574,6 +579,7 @@ function mapSupabaseData(
     ghlContactId: document.ghl_contact_id ?? "",
     ghlOpportunityId: document.ghl_opportunity_id ?? "",
     id: document.id,
+    locationId: document.location_id ?? "",
     transactionId: document.transaction_id ?? "",
     documentType: document.document_type ?? "",
     documentName: document.document_name ?? "",
@@ -763,7 +769,7 @@ async function fetchCrmData(
     client
       .from("transaction_documents")
       .select(
-        "id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
+        "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
       )
       .eq("location_id", activeLocationId)
       .order("created_at", { ascending: false }),
@@ -786,10 +792,39 @@ async function fetchCrmData(
     transactions: transactionsResult.data?.length ?? 0,
   });
 
+  const transactions = (transactionsResult.data ?? []) as SupabaseTransaction[];
+  let documents = (documentsResult.data ?? []) as SupabaseTransactionDocument[];
+  const createdDocumentRows = await ensureDocumentChecklists(
+    client,
+    activeLocationId,
+    transactions,
+  );
+
+  if (createdDocumentRows) {
+    const refreshedDocumentsResult = await client
+      .from("transaction_documents")
+      .select(
+        "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
+      )
+      .eq("location_id", activeLocationId)
+      .order("created_at", { ascending: false });
+
+    if (refreshedDocumentsResult.error) {
+      console.error("DoorScale document checklist reload failed:", {
+        activeLocationId,
+        error: refreshedDocumentsResult.error,
+      });
+      throw new Error("Unable to load transaction documents.");
+    }
+
+    documents =
+      (refreshedDocumentsResult.data ?? []) as SupabaseTransactionDocument[];
+  }
+
   return mapSupabaseData(
-    transactionsResult.data ?? [],
+    transactions,
     tasksResult.data ?? [],
-    documentsResult.data ?? [],
+    documents,
   );
 }
 
@@ -885,11 +920,9 @@ async function generateDocumentChecklist(
   const { data: templates, error: templateError } = await client
     .from("document_templates")
     .select(
-      "id, location_id, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
+      "id, location_id, transaction_type, stage, stage_name, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
     )
     .in("location_id", [activeLocationId, "demo-location", "global"])
-    .eq("transaction_type", transactionType)
-    .eq("stage", stage)
     .order("sort_order", { ascending: true });
 
   if (templateError) {
@@ -900,14 +933,30 @@ async function generateDocumentChecklist(
   const locationSpecificTemplates = templateRows.filter(
     (template) => template.location_id === activeLocationId,
   );
-  const documentTemplates =
+  const availableTemplates =
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
       : templateRows.filter((template) =>
           ["demo-location", "global"].includes(template.location_id ?? ""),
         );
+  const normalizedTransactionType = transactionType.trim().toLowerCase();
+  const normalizedStage = stage.trim().toLowerCase();
+  const documentTemplates = availableTemplates.filter((template) => {
+    const templateTransactionType = template.transaction_type
+      ?.trim()
+      .toLowerCase();
+    const templateStage = (template.stage_name || template.stage)
+      ?.trim()
+      .toLowerCase();
+    const typeMatches =
+      !templateTransactionType ||
+      templateTransactionType === normalizedTransactionType;
+    const stageMatches = !templateStage || templateStage === normalizedStage;
 
-  if (!documentTemplates.length) return;
+    return typeMatches && stageMatches;
+  });
+
+  if (!documentTemplates.length) return false;
 
   const { data: existingDocuments, error: existingDocumentsError } = await client
     .from("transaction_documents")
@@ -941,7 +990,7 @@ async function generateDocumentChecklist(
       status: "needed",
     }));
 
-  if (!documentRows.length) return;
+  if (!documentRows.length) return false;
 
   const { error: insertError } = await client
     .from("transaction_documents")
@@ -950,6 +999,28 @@ async function generateDocumentChecklist(
   if (insertError) {
     throw new Error("Unable to create document checklist.");
   }
+
+  return true;
+}
+
+async function ensureDocumentChecklists(
+  client: SupabaseClient,
+  activeLocationId: string,
+  transactions: SupabaseTransaction[],
+) {
+  let createdRows = false;
+  for (const transaction of transactions) {
+    const created = await generateDocumentChecklist(
+      client,
+      activeLocationId,
+      transaction.id,
+      transaction.transaction_type || "",
+      transaction.stage || "",
+    );
+    createdRows ||= Boolean(created);
+  }
+
+  return createdRows;
 }
 
 const emptyData: CrmDataState = {
