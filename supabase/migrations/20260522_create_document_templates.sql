@@ -7,7 +7,6 @@ create table if not exists public.document_templates (
   stage text,
   stage_name text,
   document_type text not null,
-  document_name text,
   delivery_type text default 'manual_upload',
   workflow_trigger_tag text,
   workflow_name text,

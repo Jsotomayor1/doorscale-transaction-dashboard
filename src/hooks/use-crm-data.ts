@@ -341,7 +341,6 @@ type SupabaseDocumentTemplate = {
   id: string;
   delivery_type?: string | null;
   location_id?: string | null;
-  document_name?: string | null;
   document_type: string | null;
   workflow_name?: string | null;
   workflow_trigger_tag?: string | null;
@@ -875,7 +874,7 @@ async function generateDocumentChecklist(
   const { data: templates, error: templateError } = await client
     .from("document_templates")
     .select(
-      "id, location_id, document_type, document_name, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
+      "id, location_id, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
     )
     .in("location_id", [activeLocationId, "demo-location", "global"])
     .eq("transaction_type", transactionType)
@@ -924,7 +923,7 @@ async function generateDocumentChecklist(
       location_id: activeLocationId,
       transaction_id: transactionId,
       document_type: template.document_type,
-      document_name: template.document_name || template.document_type,
+      document_name: template.document_type,
       delivery_type: template.delivery_type || "manual_upload",
       workflow_trigger_tag: template.workflow_trigger_tag || null,
       workflow_name: template.workflow_name || null,
