@@ -9,7 +9,7 @@ import {
   StickyNote,
   Upload,
 } from "lucide-react";
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { EditTransactionModal } from "@/components/EditTransactionModal";
 import { Badge } from "@/components/ui/badge";
@@ -176,12 +176,70 @@ export default function TransactionDetail() {
   const [detailMessage, setDetailMessage] = useState("");
   const [detailError, setDetailError] = useState("");
   const [uploadingDocumentId, setUploadingDocumentId] = useState("");
-  const [lastDocumentAction, setLastDocumentAction] = useState("None yet");
-  const [lastDocumentResponse, setLastDocumentResponse] =
-    useState("No document response yet");
+  const [isPreparingDocuments, setIsPreparingDocuments] = useState(false);
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
+  const maybeTransactionId = transaction ? String(transaction.id) : "";
+  const maybeActiveLocationId =
+    getUrlActiveLocationId() ||
+    getStoredActiveLocationId() ||
+    transaction?.ghlLocationId ||
+    "";
+  const maybeTransactionType = transaction?.customFields.transactionType || "";
+  const maybeCurrentStage = transaction?.stage || "";
+  const transactionDocumentsForCurrentTransaction = data.documents.filter(
+    (document) =>
+      document.transactionId === maybeTransactionId &&
+      document.locationId === maybeActiveLocationId &&
+      Boolean(document.id),
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function prepareDocuments() {
+      if (
+        data.loading ||
+        data.error ||
+        !transaction ||
+        !maybeTransactionId ||
+        !maybeActiveLocationId
+      ) {
+        return;
+      }
+
+      setIsPreparingDocuments(true);
+
+      try {
+        await data.ensureTransactionDocuments({
+          stage: maybeCurrentStage,
+          transactionId: maybeTransactionId,
+          transactionType: maybeTransactionType,
+        });
+      } finally {
+        if (isMounted) {
+          setIsPreparingDocuments(false);
+        }
+      }
+    }
+
+    if (!transactionDocumentsForCurrentTransaction.length) {
+      void prepareDocuments();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    data,
+    maybeActiveLocationId,
+    maybeCurrentStage,
+    maybeTransactionId,
+    maybeTransactionType,
+    transaction,
+    transactionDocumentsForCurrentTransaction.length,
+  ]);
 
   if (data.loading) {
     return (
@@ -226,12 +284,8 @@ export default function TransactionDetail() {
   }
 
   const fields = transaction.customFields;
-  const transactionId = String(transaction.id);
-  const activeLocationId =
-    getUrlActiveLocationId() ||
-    getStoredActiveLocationId() ||
-    transaction.ghlLocationId ||
-    "";
+  const transactionId = maybeTransactionId;
+  const activeLocationId = maybeActiveLocationId;
   const transactionType = fields.transactionType;
   const currentStage = transaction.stage;
   const contactLink = buildContactLink(
@@ -247,12 +301,7 @@ export default function TransactionDetail() {
       String(task.relatedOpportunityId) === transactionId ||
       String(task.transactionId) === transactionId,
   );
-  const transactionDocuments = data.documents.filter(
-    (document) =>
-      document.transactionId === transactionId &&
-      document.locationId === activeLocationId &&
-      Boolean(document.id),
-  );
+  const transactionDocuments = transactionDocumentsForCurrentTransaction;
   const documentTrackingRows = transactionDocuments.map((document) => ({
     document,
     documentType: document.documentName || document.documentType,
@@ -343,25 +392,19 @@ export default function TransactionDetail() {
   ) {
     setDetailMessage("");
     setDetailError("");
-    setLastDocumentAction(`backend request started status ${documentRecord.id}`);
-    setLastDocumentResponse("Saving status...");
 
     try {
-      const result = await data.updateDocumentStatus({
+      await data.updateDocumentStatus({
         documentId: documentRecord.id,
         status: status as DocumentStatus,
         transactionId,
       });
-      setLastDocumentResponse(
-        `${result?.status ?? "OK"}: ${result?.message ?? "Document status updated."}`,
-      );
       setDetailMessage("Document status updated.");
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : "Unable to update document status.";
-      setLastDocumentResponse(`Error: ${message}`);
       setDetailError(
         message,
       );
@@ -381,25 +424,19 @@ export default function TransactionDetail() {
     console.log("Selected document file:", file.name);
     setDetailMessage("");
     setDetailError("");
-    setLastDocumentAction(`backend request started upload ${documentId}`);
-    setLastDocumentResponse("Uploading document...");
     setUploadingDocumentId(documentId);
 
     try {
-      const result = await data.uploadTransactionDocument({
+      await data.uploadTransactionDocument({
         documentId,
         documentType,
         file,
         transactionId,
       });
-      setLastDocumentResponse(
-        `${result?.status ?? "OK"}: ${result?.message ?? "Document uploaded."}`,
-      );
       setDetailMessage("Document uploaded.");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to upload document.";
-      setLastDocumentResponse(`Error: ${message}`);
       setDetailError(message);
     } finally {
       setUploadingDocumentId("");
@@ -411,8 +448,11 @@ export default function TransactionDetail() {
     documentRecord: TransactionDocument,
   ) {
     const fileName = event.target.files?.[0]?.name || "none";
-    setLastDocumentAction(`file selected ${documentRecord.id}`);
-    setLastDocumentResponse(`Selected file: ${fileName}`);
+    console.log("Selected transaction document file:", {
+      documentId: documentRecord.id,
+      fileName,
+      transactionId,
+    });
     void handleDocumentUpload(
       documentRecord.id,
       documentRecord.documentType,
@@ -811,18 +851,13 @@ export default function TransactionDetail() {
             </div>
           </CardHeader>
           <CardContent>
-            <p className="documents-helper">Document upload UI active</p>
-            <div className="debug-panel document-debug-panel">
-              <strong>Document debug</strong>
-              <span>activeLocationId: {activeLocationId || "missing"}</span>
-              <span>transactionId: {transactionId || "missing"}</span>
-              <span>document count: {transactionDocuments.length}</span>
-              <span>last document action: {lastDocumentAction}</span>
-              <span>last response: {lastDocumentResponse}</span>
-            </div>
             <div className="placeholder-list">
               {!documentTrackingRows.length ? (
-                <div className="empty-state">Preparing checklist...</div>
+                <div className="empty-state">
+                  {isPreparingDocuments
+                    ? "Preparing document checklist..."
+                    : "Document checklist is still preparing."}
+                </div>
               ) : null}
               {documentTrackingRows.map(({ document: documentRecord, documentType }) => {
                 console.log("Document row render", {
@@ -863,9 +898,6 @@ export default function TransactionDetail() {
                             documentRecord.doorScaleFileId ||
                             "No file uploaded"}
                       </small>
-                      <small>Document id: {documentRecord.id}</small>
-                      <small>Location id: {documentRecord.locationId}</small>
-                      <small>Transaction id: {documentRecord.transactionId}</small>
                       {!workflowDocument ? (
                         <small>
                           {documentRecord.uploadedAt
@@ -884,9 +916,6 @@ export default function TransactionDetail() {
                     <select
                       aria-label={`Update ${documentType} status`}
                       onChange={(event) => {
-                        setLastDocumentAction(
-                          `status changed ${documentRecord.id} ${event.target.value}`,
-                        );
                         void handleDocumentStatusChange(
                           documentRecord,
                           event.target.value,
@@ -927,10 +956,6 @@ export default function TransactionDetail() {
                         <button
                           className="button button--secondary"
                           onClick={() => {
-                            setLastDocumentAction(
-                              `upload clicked ${documentRecord.id}`,
-                            );
-                            setLastDocumentResponse("Opening file picker...");
                             console.log("upload clicked", documentRecord.id);
                             window.document
                               .getElementById(`file-${documentRecord.id}`)

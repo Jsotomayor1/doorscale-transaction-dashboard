@@ -21,7 +21,6 @@ export function AppSidebar() {
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
-  const [syncDebug, setSyncDebug] = useState("No sync response yet.");
 
   useEffect(() => {
     let isMounted = true;
@@ -66,7 +65,6 @@ export function AppSidebar() {
 
   async function handleConnectionClick() {
     setSyncMessage("");
-    setSyncDebug("Sync not started.");
 
     if (!isConnected) {
       window.location.href = withActiveLocationPath("/private-integration");
@@ -88,41 +86,9 @@ export function AppSidebar() {
         }),
       });
       const result = (await response.json().catch(() => ({}))) as {
-        data?: {
-          documents?: unknown[];
-          tasks?: unknown[];
-          transactions?: unknown[];
-        };
-        documents?: unknown[];
         message?: string;
         ok?: boolean;
-        syncedDocuments?: number;
-        syncedTasks?: number;
-        syncedTransactions?: number;
-        tasks?: unknown[];
-        transactions?: unknown[];
       };
-      const transactions =
-        result.transactions ?? result.data?.transactions ?? [];
-      const tasks = result.tasks ?? result.data?.tasks ?? [];
-      const documents = result.documents ?? result.data?.documents ?? [];
-
-      setSyncDebug(
-        JSON.stringify({
-          routeCalled: "/api/ghl action sync",
-          responseStatus: response.status,
-          responseBodyPreview: JSON.stringify(result).slice(0, 300),
-          parsedTransactionCount: Array.isArray(transactions)
-            ? transactions.length
-            : result.syncedTransactions ?? 0,
-          parsedTaskCount: Array.isArray(tasks)
-            ? tasks.length
-            : result.syncedTasks ?? 0,
-          parsedDocumentCount: Array.isArray(documents)
-            ? documents.length
-            : result.syncedDocuments ?? 0,
-        }),
-      );
 
       if (!response.ok || result.ok === false) {
         throw new Error(
@@ -191,7 +157,6 @@ export function AppSidebar() {
         {syncMessage ? (
           <p className="sidebar__sync-message">{syncMessage}</p>
         ) : null}
-        <p className="sidebar__sync-message">{syncDebug}</p>
       </div>
     </aside>
   );

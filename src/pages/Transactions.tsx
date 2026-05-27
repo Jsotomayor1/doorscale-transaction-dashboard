@@ -47,7 +47,7 @@ function participantLine(transaction: Transaction) {
 }
 
 export default function Transactions() {
-  const { error, loadDebug, loading, transactions } = useCRMData();
+  const { error, loading, transactions } = useCRMData();
   const [stageFilter, setStageFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
 
@@ -76,14 +76,6 @@ export default function Transactions() {
           <p>Filter every DoorScale transaction by stage and type.</p>
           {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
-          <div className="debug-panel">
-            <strong>Load debug</strong>
-            <span>route called: {loadDebug.routeCalled}</span>
-            <span>response status: {loadDebug.responseStatus}</span>
-            <span>response body preview: {loadDebug.responseBodyPreview}</span>
-            <span>parsed transactions: {loadDebug.parsedTransactionCount}</span>
-            <span>parsed documents: {loadDebug.parsedDocumentCount}</span>
-          </div>
         </div>
       </header>
 

@@ -71,6 +71,12 @@ export type UploadDocumentInput = {
   transactionId: string;
 };
 
+export type EnsureTransactionDocumentsInput = {
+  stage: string;
+  transactionId: string;
+  transactionType: string;
+};
+
 export type CreateTaskInput = {
   assignedTo: string;
   dueDate: string;
@@ -374,24 +380,6 @@ type CrmDataState = {
   opportunities: Opportunity[];
   tasks: DashboardTask[];
   documents: TransactionDocument[];
-};
-
-export type DataLoadDebug = {
-  parsedDocumentCount: number;
-  parsedTaskCount: number;
-  parsedTransactionCount: number;
-  responseBodyPreview: string;
-  responseStatus: string;
-  routeCalled: string;
-};
-
-const initialLoadDebug: DataLoadDebug = {
-  parsedDocumentCount: 0,
-  parsedTaskCount: 0,
-  parsedTransactionCount: 0,
-  responseBodyPreview: "No load response yet.",
-  responseStatus: "Not loaded",
-  routeCalled: "local DoorScale data",
 };
 
 function normalizeDocumentStatusValue(status = "needed"): DocumentStatus {
@@ -705,6 +693,33 @@ function mapSupabaseData(
   };
 }
 
+function mapSupabaseDocument(document: SupabaseTransactionDocument): TransactionDocument {
+  return {
+    fileName:
+      document.file_name ??
+      document.doorscale_file_id?.split("/").pop()?.replace(/^\d+-/, "") ??
+      "",
+    filePath: document.file_path ?? document.doorscale_file_id ?? "",
+    fileUrl: document.file_url ?? "",
+    ghlContactId: document.ghl_contact_id ?? "",
+    ghlOpportunityId: document.ghl_opportunity_id ?? "",
+    id: document.id,
+    locationId: document.location_id ?? "",
+    transactionId: document.transaction_id ?? "",
+    documentType: document.document_type ?? "",
+    documentName: document.document_name ?? "",
+    deliveryType: document.delivery_type ?? "manual_upload",
+    doorScaleFileId: document.doorscale_file_id ?? "",
+    doorScaleContactId: document.doorscale_contact_id ?? "",
+    status: normalizeDocumentStatusValue(document.status ?? undefined),
+    uploadedAt: document.uploaded_at ?? "",
+    uploadedBy: document.uploaded_by ?? "",
+    workflowName: document.workflow_name ?? "",
+    workflowTriggerTag: document.workflow_trigger_tag ?? "",
+    createdAt: document.created_at ?? "",
+  };
+}
+
 function mapDemoData(): CrmDataState {
   const tasks = demoTransactions.flatMap((transaction) =>
     transaction.tasks.map((task) => ({
@@ -765,10 +780,38 @@ async function getActiveLocationId() {
   return "";
 }
 
+async function loadLocationDocuments(
+  client: SupabaseClient,
+  activeLocationId: string,
+) {
+  return client
+    .from("transaction_documents")
+    .select(
+      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
+    )
+    .eq("location_id", activeLocationId)
+    .order("created_at", { ascending: false });
+}
+
+async function loadTransactionDocuments(
+  client: SupabaseClient,
+  activeLocationId: string,
+  transactionId: string,
+) {
+  return client
+    .from("transaction_documents")
+    .select(
+      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
+    )
+    .eq("location_id", activeLocationId)
+    .eq("transaction_id", transactionId)
+    .order("created_at", { ascending: false });
+}
+
 async function fetchCrmData(
   client: SupabaseClient,
   activeLocationId: string,
-): Promise<{ data: CrmDataState; debug: DataLoadDebug }> {
+): Promise<CrmDataState> {
   const [transactionsResult, tasksResult, documentsResult] = await Promise.all([
     client
       .from("transactions")
@@ -784,13 +827,7 @@ async function fetchCrmData(
       )
       .eq("location_id", activeLocationId)
       .order("created_at", { ascending: false }),
-    client
-      .from("transaction_documents")
-      .select(
-        "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
-      )
-      .eq("location_id", activeLocationId)
-      .order("created_at", { ascending: false }),
+    loadLocationDocuments(client, activeLocationId),
   ]);
 
   if (transactionsResult.error) {
@@ -806,7 +843,7 @@ async function fetchCrmData(
     console.warn("DoorScale tasks unavailable during load:", tasksResult.error);
   }
 
-  if (documentsResult.error) {
+  if ("error" in documentsResult && documentsResult.error) {
     console.warn(
       "DoorScale documents unavailable during load:",
       documentsResult.error,
@@ -826,7 +863,6 @@ async function fetchCrmData(
   let documents = documentsResult.error
     ? []
     : ((documentsResult.data ?? []) as SupabaseTransactionDocument[]);
-  let documentChecklistMessage = "";
 
   let createdDocumentRows = false;
   try {
@@ -840,55 +876,30 @@ async function fetchCrmData(
       activeLocationId,
       error: checklistError,
     });
-    documentChecklistMessage = "Document checklist will finish preparing later.";
   }
 
   if (createdDocumentRows) {
-    const refreshedDocumentsResult = await client
-      .from("transaction_documents")
-      .select(
-        "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
-      )
-      .eq("location_id", activeLocationId)
-      .order("created_at", { ascending: false });
+    const refreshedDocumentsResult = await loadLocationDocuments(
+      client,
+      activeLocationId,
+    );
 
     if (refreshedDocumentsResult.error) {
       console.error("DoorScale document checklist reload failed:", {
         activeLocationId,
         error: refreshedDocumentsResult.error,
       });
-      documentChecklistMessage = "Document checklist will finish preparing later.";
     } else {
       documents =
         (refreshedDocumentsResult.data ?? []) as SupabaseTransactionDocument[];
     }
   }
 
-  const mappedData = mapSupabaseData(
+  return mapSupabaseData(
     transactions,
     tasks,
     documents,
   );
-  const debug: DataLoadDebug = {
-    parsedDocumentCount: mappedData.documents.length,
-    parsedTaskCount: mappedData.tasks.length,
-    parsedTransactionCount: mappedData.transactions.length,
-    responseBodyPreview: JSON.stringify({
-      documentsError: documentsResult.error ? "documents unavailable" : null,
-      documentChecklistMessage,
-      tasksError: tasksResult.error ? "tasks unavailable" : null,
-      transactions: transactions.length,
-      tasks: tasks.length,
-      documents: documents.length,
-    }).slice(0, 500),
-    responseStatus: "loaded",
-    routeCalled: `local DoorScale tables for ${activeLocationId}`,
-  };
-
-  return {
-    data: mappedData,
-    debug,
-  };
 }
 
 async function generateChecklistTasks(
@@ -985,7 +996,7 @@ async function generateDocumentChecklist(
     .select(
       "id, location_id, transaction_type, stage, stage_name, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
     )
-    .in("location_id", [activeLocationId, "demo-location", "global"])
+    .in("location_id", [activeLocationId, "global"])
     .order("sort_order", { ascending: true });
 
   if (templateError) {
@@ -1000,7 +1011,7 @@ async function generateDocumentChecklist(
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
       : templateRows.filter((template) =>
-          ["demo-location", "global"].includes(template.location_id ?? ""),
+          template.location_id === "global",
         );
   const normalizedTransactionType = transactionType.trim().toLowerCase();
   const normalizedStage = stage.trim().toLowerCase();
@@ -1132,19 +1143,10 @@ export function useCrmData() {
   const [loading, setLoading] = useState(!isDemoMode());
   const [error, setError] = useState<string | null>(null);
   const [activeLocationId, setActiveLocationId] = useState("");
-  const [loadDebug, setLoadDebug] = useState<DataLoadDebug>(initialLoadDebug);
 
   const refreshData = useCallback(async () => {
     if (isDemoMode()) {
       setData(mapDemoData());
-      setLoadDebug({
-        parsedDocumentCount: 0,
-        parsedTaskCount: mapDemoData().tasks.length,
-        parsedTransactionCount: mapDemoData().transactions.length,
-        responseBodyPreview: "Demo data loaded.",
-        responseStatus: "loaded",
-        routeCalled: "demo DoorScale data",
-      });
       setLoading(false);
       setError(null);
       return;
@@ -1171,20 +1173,9 @@ export function useCrmData() {
       }
 
       setActiveLocationId(locationId);
-      const result = await fetchCrmData(client, locationId);
-      setData(result.data);
-      setLoadDebug(result.debug);
+      setData(await fetchCrmData(client, locationId));
     } catch (crmError) {
       console.error("DoorScale transaction data load failed:", crmError);
-      setLoadDebug({
-        parsedDocumentCount: 0,
-        parsedTaskCount: 0,
-        parsedTransactionCount: 0,
-        responseBodyPreview:
-          crmError instanceof Error ? crmError.message : "Load failed.",
-        responseStatus: "error",
-        routeCalled: "local DoorScale tables",
-      });
       setError("Unable to load transaction data.");
     } finally {
       setLoading(false);
@@ -1959,6 +1950,89 @@ export function useCrmData() {
     [activeLocationId, refreshData],
   );
 
+  const ensureTransactionDocuments = useCallback(
+    async ({
+      stage,
+      transactionId,
+      transactionType,
+    }: EnsureTransactionDocumentsInput) => {
+      if (isDemoMode()) return;
+
+      const client = getSupabaseClient();
+
+      if (!client) return;
+
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId || !transactionId) return;
+
+      try {
+        let documentsResult = await loadTransactionDocuments(
+          client,
+          locationId,
+          transactionId,
+        );
+
+        if (documentsResult.error) {
+          console.warn("DoorScale transaction documents unavailable:", {
+            error: documentsResult.error,
+            locationId,
+            transactionId,
+          });
+          return;
+        }
+
+        if (!documentsResult.data?.length) {
+          await generateDocumentChecklist(
+            client,
+            locationId,
+            transactionId,
+            transactionType,
+            stage,
+          );
+          documentsResult = await loadTransactionDocuments(
+            client,
+            locationId,
+            transactionId,
+          );
+
+          if (documentsResult.error) {
+            console.warn("DoorScale transaction documents reload unavailable:", {
+              error: documentsResult.error,
+              locationId,
+              transactionId,
+            });
+            return;
+          }
+        }
+
+        const documents = ((documentsResult.data ?? []) as SupabaseTransactionDocument[])
+          .map(mapSupabaseDocument);
+
+        setData((currentData) => ({
+          ...currentData,
+          documents: [
+            ...currentData.documents.filter(
+              (document) =>
+                !(
+                  document.locationId === locationId &&
+                  document.transactionId === transactionId
+                ),
+            ),
+            ...documents,
+          ],
+        }));
+      } catch (documentError) {
+        console.warn("DoorScale document checklist is still preparing:", {
+          error: documentError,
+          locationId,
+          transactionId,
+        });
+      }
+    },
+    [activeLocationId],
+  );
+
   useEffect(() => {
     void refreshData();
   }, [refreshData]);
@@ -2023,7 +2097,6 @@ export function useCrmData() {
       }),
       totalCommission,
       documentCounts,
-      loadDebug,
       stageCounts,
       loading,
       error,
@@ -2038,14 +2111,15 @@ export function useCrmData() {
       retryTaskSync,
       updateDocumentStatus,
       uploadTransactionDocument,
+      ensureTransactionDocuments,
     };
   }, [
     createTask,
     createTransaction,
     data,
     error,
+    ensureTransactionDocuments,
     loading,
-    loadDebug,
     markTaskCompleted,
     refreshData,
     retryTaskSync,
