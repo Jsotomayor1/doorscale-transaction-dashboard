@@ -9,6 +9,8 @@ export const config = {
 };
 
 const BUCKET_NAME = "transaction-documents";
+const CONTACTS_URL_BASE = "https://services.leadconnectorhq.com/contacts";
+const API_VERSION = "2021-07-28";
 
 type MultipartPart = {
   contentType: string;
@@ -22,6 +24,14 @@ type TransactionRow = {
   ghl_opportunity_id?: string | null;
   id: string;
   location_id: string;
+};
+
+type DocumentRow = {
+  doorscale_contact_id?: string | null;
+  document_type?: string | null;
+  id: string;
+  location_id: string;
+  transaction_id: string;
 };
 
 function getSupabaseServiceClient() {
@@ -131,17 +141,71 @@ function sanitizePathSegment(value: string) {
 }
 
 async function mirrorDocumentToGhlContact(input: {
+  accessToken: string;
   contactId?: string | null;
   documentId: string;
+  fileUrl: string;
   locationId: string;
   transactionId: string;
 }) {
-  console.log("GHL document mirror pending", {
+  if (!input.contactId || !input.fileUrl) {
+    console.log("DoorScale contact document mirror skipped:", {
+      contactId: input.contactId || null,
+      documentId: input.documentId,
+      fileUrlAvailable: Boolean(input.fileUrl),
+      locationId: input.locationId,
+      transactionId: input.transactionId,
+    });
+    return {
+      ok: false,
+      message: !input.contactId ? "Missing contact id." : "Missing file URL.",
+      status: 0,
+    };
+  }
+
+  const endpoint = `${CONTACTS_URL_BASE}/${encodeURIComponent(input.contactId)}`;
+  const body = {
+    customFields: [
+      {
+        key: "transaction_documents",
+        field_value: input.fileUrl,
+      },
+    ],
+  };
+
+  console.log("DoorScale contact document mirror request:", {
     contactId: input.contactId || null,
     documentId: input.documentId,
+    endpoint,
+    fileUrl: input.fileUrl,
     locationId: input.locationId,
     transactionId: input.transactionId,
   });
+
+  const mirrorResponse = await fetch(endpoint, {
+    method: "PUT",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
+    },
+    body: JSON.stringify(body),
+  });
+  const responseBody = await mirrorResponse.text();
+
+  console.log("DoorScale contact document mirror response:", {
+    body: responseBody,
+    contactId: input.contactId,
+    documentId: input.documentId,
+    status: mirrorResponse.status,
+  });
+
+  return {
+    ok: mirrorResponse.ok,
+    message: responseBody || mirrorResponse.statusText,
+    status: mirrorResponse.status,
+  };
 }
 
 export default async function handler(
@@ -225,7 +289,7 @@ export default async function handler(
 
     const { data: documentRow, error: documentLookupError } = await supabase
       .from("transaction_documents")
-      .select("id, transaction_id, document_type, location_id")
+      .select("id, transaction_id, document_type, location_id, doorscale_contact_id")
       .eq("id", documentId)
       .eq("transaction_id", transactionId)
       .eq("location_id", activeLocation.activeLocationId)
@@ -251,6 +315,7 @@ export default async function handler(
       });
     }
 
+    const documentRecord = documentRow as DocumentRow;
     const timestamp = Date.now();
     const fileName = file.filename || "document";
     const filePath = [
@@ -283,6 +348,9 @@ export default async function handler(
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from(BUCKET_NAME)
       .createSignedUrl(filePath, 60 * 60 * 24 * 7);
+    const { data: publicUrlData } = supabase.storage
+      .from(BUCKET_NAME)
+      .getPublicUrl(filePath);
 
     if (signedUrlError) {
       console.error("DoorScale document link creation failed:", {
@@ -292,11 +360,21 @@ export default async function handler(
       });
     }
 
+    const fileUrl = signedUrlData?.signedUrl || publicUrlData?.publicUrl || filePath;
+    console.log("DoorScale document file URL generated:", {
+      activeLocationId: activeLocation.activeLocationId,
+      documentId,
+      fileUrl,
+      transactionId,
+    });
+
+    const contactId =
+      documentRecord.doorscale_contact_id || transactionRow.ghl_contact_id || null;
     const uploadedAt = new Date().toISOString();
     const payload = {
       doorscale_file_id: filePath,
       document_name: documentType,
-      doorscale_contact_id: transactionRow.ghl_contact_id ?? null,
+      doorscale_contact_id: contactId,
       location_id: activeLocation.activeLocationId,
       status: "uploaded",
       transaction_id: transactionId,
@@ -337,7 +415,7 @@ export default async function handler(
     const optionalMetadata = {
       file_name: fileName,
       file_path: filePath,
-      file_url: signedUrlData?.signedUrl ?? "",
+      file_url: fileUrl,
       ghl_contact_id: transactionRow.ghl_contact_id ?? null,
       ghl_opportunity_id: transactionRow.ghl_opportunity_id ?? null,
       uploaded_by: "DoorScale",
@@ -358,18 +436,52 @@ export default async function handler(
       });
     }
 
+    let mirrorStatus = "skipped";
+    let mirrorError = "";
+
     try {
-      await mirrorDocumentToGhlContact({
-        contactId: transactionRow.ghl_contact_id,
+      const mirrorResult = await mirrorDocumentToGhlContact({
+        accessToken: activeLocation.access_token,
+        contactId,
         documentId,
+        fileUrl,
         locationId: activeLocation.activeLocationId,
         transactionId,
       });
-    } catch (mirrorError) {
+
+      mirrorStatus = mirrorResult.ok ? "synced" : "failed";
+      mirrorError = mirrorResult.ok ? "" : mirrorResult.message.slice(0, 500);
+    } catch (mirrorException) {
+      mirrorStatus = "failed";
+      const message =
+        mirrorException instanceof Error
+          ? mirrorException.message
+          : "Unable to mirror document.";
       console.error("DoorScale document mirror skipped:", {
         activeLocationId: activeLocation.activeLocationId,
         documentId,
-        error: mirrorError,
+        error: mirrorException,
+        transactionId,
+      });
+      mirrorError = message.slice(0, 500);
+    }
+
+    const { error: mirrorMetadataError } = await supabase
+      .from("transaction_documents")
+      .update({
+        ghl_file_url: fileUrl,
+        ghl_mirror_error: mirrorError || null,
+        ghl_mirror_status: mirrorStatus,
+      })
+      .eq("id", documentId)
+      .eq("transaction_id", transactionId)
+      .eq("location_id", activeLocation.activeLocationId);
+
+    if (mirrorMetadataError) {
+      console.log("DoorScale document mirror metadata skipped:", {
+        activeLocationId: activeLocation.activeLocationId,
+        documentId,
+        message: mirrorMetadataError.message,
         transactionId,
       });
     }
@@ -387,7 +499,7 @@ export default async function handler(
         ...(updatedDocument ?? {}),
         fileName,
         filePath,
-        fileUrl: signedUrlData?.signedUrl ?? "",
+        fileUrl,
       },
       message: "Document uploaded.",
       ok: true,
