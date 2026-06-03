@@ -13,12 +13,12 @@ export function NavLink({ to, icon, children }: NavLinkProps) {
   return (
     <RouterNavLink
       className={({ isActive }) =>
-        cn("sidebar__link", isActive && "sidebar__link--active")
+        cn("top-nav__link", isActive && "top-nav__link--active")
       }
       end={to === "/"}
       to={withActiveLocationPath(to)}
     >
-      <span className="sidebar__link-icon">{icon}</span>
+      <span className="top-nav__link-icon">{icon}</span>
       <span>{children}</span>
     </RouterNavLink>
   );

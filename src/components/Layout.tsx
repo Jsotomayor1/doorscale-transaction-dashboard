@@ -1,10 +1,10 @@
 import { Outlet } from "react-router-dom";
-import { AppSidebar } from "@/components/AppSidebar";
+import { AppTopNav } from "@/components/AppTopNav";
 
 export function Layout() {
   return (
     <div className="app-shell">
-      <AppSidebar />
+      <AppTopNav />
       <main className="app-main">
         <Outlet />
       </main>

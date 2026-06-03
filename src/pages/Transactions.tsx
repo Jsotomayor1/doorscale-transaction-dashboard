@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import { CalendarClock, Filter, Home, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +48,10 @@ function participantLine(transaction: Transaction) {
 
 export default function Transactions() {
   const { error, loading, transactions } = useCRMData();
-  const [stageFilter, setStageFilter] = useState("all");
+  const [searchParams] = useSearchParams();
+  const [stageFilter, setStageFilter] = useState(
+    searchParams.get("stage") || "all",
+  );
   const [typeFilter, setTypeFilter] = useState("all");
 
   const transactionTypes = useMemo(

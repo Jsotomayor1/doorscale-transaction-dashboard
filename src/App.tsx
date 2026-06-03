@@ -3,6 +3,7 @@ import { DoorScaleGate } from "@/components/DoorScaleGate";
 import { Layout } from "@/components/Layout";
 import ChooseAccount from "@/pages/ChooseAccount";
 import Commissions from "@/pages/Commissions";
+import Documents from "@/pages/Documents";
 import Index from "@/pages/Index";
 import MobileDashboard from "@/pages/MobileDashboard";
 import PrivateIntegration from "@/pages/PrivateIntegration";
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="transactions" element={<Transactions />} />
           <Route path="transactions/:id" element={<TransactionDetail />} />
           <Route path="tasks" element={<Tasks />} />
+          <Route path="documents" element={<Documents />} />
           <Route path="commissions" element={<Commissions />} />
         </Route>
         <Route path="choose-account" element={<ChooseAccount />} />

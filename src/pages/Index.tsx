@@ -5,15 +5,11 @@ import {
   Clock3,
   FileText,
   DollarSign,
-  Plus,
   Workflow,
 } from "lucide-react";
-import { useState } from "react";
-import { NewTransactionModal } from "@/components/NewTransactionModal";
 import { OverviewChart } from "@/components/OverviewChart";
 import { RecentSales } from "@/components/RecentSales";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -53,11 +49,8 @@ function formatDueDate(dueDateValue: string) {
 }
 
 export default function Index() {
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [successMessage, setSuccessMessage] = useState("");
   const {
     activeTransactions,
-    createTransaction,
     documentCounts,
     error,
     loading,
@@ -71,6 +64,13 @@ export default function Index() {
   const urgentTasks = openTasks.filter((task) =>
     isDueSoon(task.dueDateTime || task.dueDate),
   );
+  const upcomingClosings = activeTransactions
+    .filter((transaction) => transaction.closeDate)
+    .sort(
+      (first, second) =>
+        new Date(first.closeDate).getTime() - new Date(second.closeDate).getTime(),
+    )
+    .slice(0, 5);
 
   return (
     <div className="dashboard">
@@ -82,31 +82,10 @@ export default function Index() {
             Track active contracts, task pressure, deadlines, commissions, and
             workflow stages in one place.
           </p>
-          {successMessage ? (
-            <p className="dashboard__success">{successMessage}</p>
-          ) : null}
           {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
         </div>
-        <Button
-          onClick={() => {
-            setSuccessMessage("");
-            setIsCreateOpen(true);
-          }}
-        >
-          <Plus size={17} />
-          New Transaction
-        </Button>
       </header>
-
-      <NewTransactionModal
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        onCreate={async (input) => {
-          const message = await createTransaction(input);
-          setSuccessMessage(message || "Transaction created successfully.");
-        }}
-      />
 
       <section className="stats-grid" aria-label="Dashboard stats">
         <Card>
@@ -187,7 +166,7 @@ export default function Index() {
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>Deadline Alerts</CardTitle>
+              <CardTitle>Urgent Tasks</CardTitle>
               <CardDescription>Tasks that need quick visibility.</CardDescription>
             </div>
           </CardHeader>
@@ -210,10 +189,35 @@ export default function Index() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Upcoming Closings</CardTitle>
+              <CardDescription>Closest active transaction closing dates.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="closing-list">
+              {upcomingClosings.map((transaction) => (
+                <div className="closing-row" key={transaction.id}>
+                  <div>
+                    <strong>{transaction.clientName}</strong>
+                    <span>{transaction.propertyAddress}</span>
+                  </div>
+                  <Badge variant="default">{formatDueDate(transaction.closeDate)}</Badge>
+                </div>
+              ))}
+              {!upcomingClosings.length ? (
+                <p className="empty-state">No upcoming closings yet.</p>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="dashboard-grid__wide">
           <CardHeader>
             <div>
-              <CardTitle>Active Transactions</CardTitle>
+              <CardTitle>Recent Transactions</CardTitle>
               <CardDescription>
                 Property, commission, close date, and stage visibility.
               </CardDescription>
