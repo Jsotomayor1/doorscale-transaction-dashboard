@@ -86,6 +86,13 @@ type OpportunityResponse = {
   };
 };
 
+type DuplicateOpportunityResponse = {
+  message?: string | string[];
+  meta?: {
+    existingId?: string;
+  };
+};
+
 const TRANSACTIONS_TABLE_COLUMNS = new Set([
   "assigned_to",
   "buyer_name",
@@ -147,6 +154,31 @@ function getOpportunityId(payload: OpportunityResponse) {
   return payload.id ?? payload.opportunity?.id ?? payload.opportunity?._id;
 }
 
+function parseJsonSafely<T>(rawBody: string): T | null {
+  try {
+    return JSON.parse(rawBody) as T;
+  } catch {
+    return null;
+  }
+}
+
+function getMessageText(message: string | string[] | undefined) {
+  return Array.isArray(message) ? message.join(" ") : message || "";
+}
+
+function getDuplicateOpportunityId(status: number, rawBody: string) {
+  if (status !== 400) return null;
+
+  const payload = parseJsonSafely<DuplicateOpportunityResponse>(rawBody);
+  const message = getMessageText(payload?.message);
+
+  if (!message.includes("Can not create duplicate opportunity for the contact")) {
+    return null;
+  }
+
+  return payload?.meta?.existingId || null;
+}
+
 function getContacts(payload: ContactSearchResponse) {
   if (Array.isArray(payload.contacts)) return payload.contacts;
   if (Array.isArray(payload.data)) return payload.data;
@@ -169,6 +201,48 @@ function cleanTransactionPayload<T extends Record<string, unknown>>(payload: T) 
   return Object.fromEntries(
     Object.entries(payload).filter(([key]) => TRANSACTIONS_TABLE_COLUMNS.has(key)),
   );
+}
+
+async function findExistingLocalTransaction(
+  supabase: ReturnType<typeof createClient>,
+  locationId: string,
+  contactId?: string,
+  opportunityId?: string,
+  propertyAddress?: string,
+) {
+  if (!contactId) return null;
+
+  if (opportunityId) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("id")
+      .eq("location_id", locationId)
+      .eq("ghl_contact_id", contactId)
+      .eq("ghl_opportunity_id", opportunityId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Local duplicate transaction lookup failed:", error);
+    }
+
+    if (data?.id) return data;
+  }
+
+  if (!propertyAddress?.trim()) return null;
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("id")
+    .eq("location_id", locationId)
+    .eq("ghl_contact_id", contactId)
+    .eq("property_address", propertyAddress.trim())
+    .maybeSingle();
+
+  if (error) {
+    console.error("Local duplicate transaction property lookup failed:", error);
+  }
+
+  return data ?? null;
 }
 
 async function getPipelineConfig(accessToken: string, locationId: string) {
@@ -374,6 +448,7 @@ export default async function handler(
   let pipelineId: string | undefined;
   let pipelineStageId: string | undefined;
   let writeBackFailed = false;
+  let duplicateOpportunityHandled = false;
 
   try {
     const connectedAccount = await getActiveLocation(
@@ -429,14 +504,45 @@ export default async function handler(
     const rawBody = await createResponse.text();
 
     if (!createResponse.ok) {
+      const duplicateOpportunityId = getDuplicateOpportunityId(
+        createResponse.status,
+        rawBody,
+      );
+
+      if (duplicateOpportunityId) {
+        duplicateOpportunityHandled = true;
+        opportunityId = duplicateOpportunityId;
+        console.log("DoorScale duplicate opportunity detected:", {
+          contactId,
+          existingOpportunityId: duplicateOpportunityId,
+          locationId: connectedAccount.location_id,
+        });
+      } else {
+        console.error("DoorScale opportunity create failed:", {
+          body: rawBody,
+          status: createResponse.status,
+        });
+        throw new Error("DoorScale opportunity create failed.");
+      }
+    } else {
+      opportunityId = getOpportunityId(
+        JSON.parse(rawBody) as OpportunityResponse,
+      );
+    }
+
+    if (duplicateOpportunityHandled) {
+      console.log("DoorScale existing opportunity ID reused:", {
+        existingOpportunityId: opportunityId,
+      });
+    }
+
+    if (!opportunityId) {
       console.error("DoorScale opportunity create failed:", {
         body: rawBody,
         status: createResponse.status,
       });
-      throw new Error("DoorScale opportunity create failed.");
+      throw new Error("DoorScale opportunity id was missing.");
     }
-
-    opportunityId = getOpportunityId(JSON.parse(rawBody) as OpportunityResponse);
   } catch (error) {
     writeBackFailed = true;
     console.error("DoorScale transaction create write-back failed:", error);
@@ -483,15 +589,35 @@ export default async function handler(
     routeName: "/api/ghl/transactions/create",
   });
 
-  const saveQuery = body.transactionId
+  const existingLocalTransaction = body.transactionId
+    ? null
+    : await findExistingLocalTransaction(
+        supabase,
+        activeLocationId,
+        contactId,
+        opportunityId,
+        body.propertyAddress,
+      );
+  const localTransactionId = body.transactionId || existingLocalTransaction?.id;
+
+  if (existingLocalTransaction?.id) {
+    console.log("Local duplicate transaction found; updating existing row:", {
+      transactionId: existingLocalTransaction.id,
+      locationId: activeLocationId,
+      ghl_contact_id: contactId,
+      ghl_opportunity_id: opportunityId ?? null,
+    });
+  }
+
+  const saveQuery = localTransactionId
     ? supabase
         .from("transactions")
         .update(transactionRow)
-        .eq("id", body.transactionId)
+        .eq("id", localTransactionId)
         .eq("location_id", activeLocationId)
-        .select("id")
+        .select("*")
         .single()
-    : supabase.from("transactions").insert(transactionRow).select("id").single();
+    : supabase.from("transactions").insert(transactionRow).select("*").single();
   const { data: savedTransaction, error: saveError } = await saveQuery;
 
   if (saveError) {
@@ -500,11 +626,22 @@ export default async function handler(
     return;
   }
 
+  console.log("Local transaction saved:", {
+    duplicateOpportunityHandled,
+    ghl_opportunity_id: opportunityId ?? null,
+    mode: localTransactionId ? "updated" : "inserted",
+    transactionId: savedTransaction?.id,
+  });
+
   response.status(200).json({
+    duplicateOpportunityHandled,
+    ghl_opportunity_id: opportunityId ?? null,
     ok: !writeBackFailed,
+    success: true,
     message: writeBackFailed
       ? "Transaction saved locally. DoorScale sync will retry later."
       : "Transaction saved.",
+    transaction: savedTransaction ?? null,
     transactionId: savedTransaction?.id,
   });
   logRouteDataCounts("/api/ghl/transactions/create", activeLocationId, {
