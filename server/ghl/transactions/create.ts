@@ -86,6 +86,34 @@ type OpportunityResponse = {
   };
 };
 
+const TRANSACTIONS_TABLE_COLUMNS = new Set([
+  "assigned_to",
+  "buyer_name",
+  "client_email",
+  "client_first_name",
+  "client_last_name",
+  "client_phone",
+  "closing_date",
+  "commission",
+  "contact_email",
+  "contact_id",
+  "contact_name",
+  "contact_phone",
+  "ghl_contact_id",
+  "ghl_location_id",
+  "ghl_opportunity_id",
+  "inspection_date",
+  "last_sync_error",
+  "last_synced_at",
+  "location_id",
+  "property_address",
+  "seller_name",
+  "stage",
+  "status",
+  "sync_status",
+  "transaction_type",
+]);
+
 function getPipelineId(pipeline: Pipeline) {
   return pipeline.id ?? pipeline._id;
 }
@@ -134,6 +162,12 @@ function getContactId(result: unknown): string | null {
     payload?.id ||
     payload?._id ||
     null
+  );
+}
+
+function cleanTransactionPayload<T extends Record<string, unknown>>(payload: T) {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([key]) => TRANSACTIONS_TABLE_COLUMNS.has(key)),
   );
 }
 
@@ -244,11 +278,8 @@ async function createContact(
     body: JSON.stringify({
       email: body.clientEmail || undefined,
       firstName: body.clientFirstName,
-      first_name: body.clientFirstName,
       lastName: body.clientLastName,
-      last_name: body.clientLastName,
       locationId,
-      location_id: locationId,
       phone: body.clientPhone || undefined,
     }),
   });
@@ -415,7 +446,7 @@ export default async function handler(
     .filter(Boolean)
     .join(" ")
     .trim();
-  const transactionRow = {
+  const transactionRow = cleanTransactionPayload({
     buyer_name: body.buyerName || null,
     client_email: body.clientEmail || null,
     client_first_name: body.clientFirstName || null,
@@ -432,7 +463,6 @@ export default async function handler(
     ghl_opportunity_id: opportunityId ?? null,
     inspection_date: body.inspectionDate || null,
     location_id: activeLocationId,
-    monetary_value: Number(body.commission || 0),
     pipeline_id: pipelineId ?? null,
     pipeline_stage_id: pipelineStageId ?? null,
     property_address: body.propertyAddress,
@@ -446,7 +476,13 @@ export default async function handler(
       : null,
     last_synced_at: writeBackFailed ? null : new Date().toISOString(),
     transaction_type: body.transactionType,
-  };
+  });
+
+  console.log("Local transaction create cleaned payload keys:", {
+    keys: Object.keys(transactionRow),
+    routeName: "/api/ghl/transactions/create",
+  });
+
   const saveQuery = body.transactionId
     ? supabase
         .from("transactions")
