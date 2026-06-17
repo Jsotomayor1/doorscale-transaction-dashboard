@@ -1312,7 +1312,6 @@ function StepFutureState({ data, setData, onNext, onBack }: { data: FutureState;
 
 function StepLeadCapture({ onUnlock, onBack }: { onUnlock?: () => void; onBack?: () => void }): JSX.Element {
   const [formSubmitted, setFormSubmitted] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const listener = (event: MessageEvent) => {
@@ -1328,15 +1327,6 @@ function StepLeadCapture({ onUnlock, onBack }: { onUnlock?: () => void; onBack?:
 
     window.addEventListener('message', listener);
 
-    const scriptId = 'doorscale-ghl-form-embed-script';
-    if (!document.getElementById(scriptId)) {
-      const script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://link.doorscale.com/js/form_embed.js';
-      script.async = true;
-      document.body.appendChild(script);
-    }
-
     return () => {
       window.removeEventListener('message', listener);
     };
@@ -1351,12 +1341,12 @@ function StepLeadCapture({ onUnlock, onBack }: { onUnlock?: () => void; onBack?:
       </PageSubtitle>
 
       <div style={{ background: COLORS.white, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 28, marginBottom: 24 }}>
-        <div ref={containerRef} style={{ width: '100%', minHeight: 560, position: 'relative' }}>
+        <div dangerouslySetInnerHTML={{ __html: `
           <iframe
             src="https://link.doorscale.com/widget/form/4zSp8XyOIikPAFNY1Lzt"
             id="inline-4zSp8XyOIikPAFNY1Lzt"
             title="Transaction Blueprint"
-            style={{ width: '100%', height: '100%', minHeight: 520, border: 'none', borderRadius: 8 }}
+            style="width:100%;height:100%;min-height:520px;border:none;border-radius:8px"
             data-layout="{'id':'INLINE'}"
             data-trigger-type="alwaysShow"
             data-trigger-value=""
@@ -1368,8 +1358,9 @@ function StepLeadCapture({ onUnlock, onBack }: { onUnlock?: () => void; onBack?:
             data-height="undefined"
             data-layout-iframe-id="inline-4zSp8XyOIikPAFNY1Lzt"
             data-form-id="4zSp8XyOIikPAFNY1Lzt"
-          />
-        </div>
+          ></iframe>
+          <script src="https://link.doorscale.com/js/form_embed.js"></script>
+        ` }} />
 
         <div style={{ marginTop: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <div style={{ color: formSubmitted ? COLORS.success : COLORS.textMuted, fontSize: 14, flex: 1 }}>
