@@ -1332,6 +1332,23 @@ function StepLeadCapture({ onUnlock, onBack }: { onUnlock?: () => void; onBack?:
     };
   }, []);
 
+  useEffect(() => {
+    if (document.querySelector('script[src="https://link.doorscale.com/js/form_embed.js"]')) {
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://link.doorscale.com/js/form_embed.js';
+    script.async = true;
+    document.body.appendChild(script);
+
+    return () => {
+      if (script.parentElement) {
+        script.parentElement.removeChild(script);
+      }
+    };
+  }, []);
+
   return (
     <div>
       <SectionEyebrow>Step 9 of 9</SectionEyebrow>
@@ -1341,26 +1358,23 @@ function StepLeadCapture({ onUnlock, onBack }: { onUnlock?: () => void; onBack?:
       </PageSubtitle>
 
       <div style={{ background: COLORS.white, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 28, marginBottom: 24 }}>
-        <div dangerouslySetInnerHTML={{ __html: `
-          <iframe
-            src="https://link.doorscale.com/widget/form/4zSp8XyOIikPAFNY1Lzt"
-            id="inline-4zSp8XyOIikPAFNY1Lzt"
-            title="Transaction Blueprint"
-            style="width:100%;height:100%;min-height:520px;border:none;border-radius:8px"
-            data-layout="{'id':'INLINE'}"
-            data-trigger-type="alwaysShow"
-            data-trigger-value=""
-            data-activation-type="alwaysActivated"
-            data-activation-value=""
-            data-deactivation-type="neverDeactivate"
-            data-deactivation-value=""
-            data-form-name="Transaction Blueprint"
-            data-height="undefined"
-            data-layout-iframe-id="inline-4zSp8XyOIikPAFNY1Lzt"
-            data-form-id="4zSp8XyOIikPAFNY1Lzt"
-          ></iframe>
-          <script src="https://link.doorscale.com/js/form_embed.js"></script>
-        ` }} />
+        <iframe
+          src="https://link.doorscale.com/widget/form/4zSp8XyOIikPAFNY1Lzt"
+          id="inline-4zSp8XyOIikPAFNY1Lzt"
+          title="Transaction Blueprint"
+          style={{ width: '100%', minHeight: 520, border: 'none', borderRadius: 8 }}
+          data-layout='{"id":"INLINE"}'
+          data-trigger-type="alwaysShow"
+          data-trigger-value=""
+          data-activation-type="alwaysActivated"
+          data-activation-value=""
+          data-deactivation-type="neverDeactivate"
+          data-deactivation-value=""
+          data-form-name="Transaction Blueprint"
+          data-height="undefined"
+          data-layout-iframe-id="inline-4zSp8XyOIikPAFNY1Lzt"
+          data-form-id="4zSp8XyOIikPAFNY1Lzt"
+        />
 
         <div style={{ marginTop: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <div style={{ color: formSubmitted ? COLORS.success : COLORS.textMuted, fontSize: 14, flex: 1 }}>
