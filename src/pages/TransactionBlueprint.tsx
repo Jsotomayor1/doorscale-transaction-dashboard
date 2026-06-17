@@ -1544,7 +1544,7 @@ function BlueprintSummary({ logo, snapshot, stages, stageData, futureState, onRe
                 <div style={{ fontWeight: 700, color: COLORS.navy, fontSize: 13.5, marginBottom: 6 }}>{s}</div>
                 <MiniTable
                   headers={["Client Question", "Update Sent", "Sender", "Timing", "Method"]}
-                  rows={comms.filter((c) => c.question.trim() || c.update.trim()).map((c) => [c.question, c.update, c.sender, c.timing, c.method])}
+                  rows={comms.filter((c) => (c.question || "").trim() || (c.update || "").trim()).map((c) => [c.question || "", c.update || "", c.sender, c.timing, c.method])}
                 />
               </div>
             );
