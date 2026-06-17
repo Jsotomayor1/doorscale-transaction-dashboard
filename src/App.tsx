@@ -10,12 +10,14 @@ import PrivateIntegration from "@/pages/PrivateIntegration";
 import Tasks from "@/pages/Tasks";
 import TransactionDetail from "@/pages/TransactionDetail";
 import Transactions from "@/pages/Transactions";
+import TransactionBlueprint from "@/pages/TransactionBlueprint";
 import "./App.css";
 
 export default function App() {
   return (
     <Routes>
       <Route path="mobile" element={<MobileDashboard />} />
+  <Route path="blueprint" element={<TransactionBlueprint />} />
       <Route element={<Layout />}>
         <Route element={<DoorScaleGate />}>
           <Route index element={<Index />} />
