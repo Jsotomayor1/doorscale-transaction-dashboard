@@ -1,9 +1,73 @@
 import React, { useState, useRef } from "react";
 
 /* ============================================================
+   TYPES
+   ============================================================ */
+
+export interface Task {
+  id: string;
+  name: string;
+  description?: string;
+  trigger?: string;
+  owner?: string;
+  requirement?: string;
+}
+
+export interface DocItem {
+  id: string;
+  name: string;
+  collectedBy?: string;
+  reviewedBy?: string;
+  storedWhere?: string;
+  accessNeeded?: string;
+}
+
+export interface CommItem {
+  id: string;
+  question?: string;
+  update?: string;
+  sender?: string;
+  timing?: string;
+  method?: string;
+}
+
+export interface StageData {
+  purpose?: string;
+  entry?: string;
+  exit?: string;
+  delays?: string;
+  risk?: string;
+  tasks: Task[];
+  documents: DocItem[];
+  communications: CommItem[];
+}
+
+export type StageDataMap = Record<string, StageData>;
+
+export interface Snapshot {
+  name?: string;
+  email?: string;
+  brokerage?: string;
+  teamSize?: string;
+  activeTransactions?: string;
+  currentMethod?: string;
+  stress?: string;
+  time?: string;
+}
+
+export interface FutureState {
+  automate?: string;
+  delegate?: string;
+  eliminate?: string;
+  stress?: string;
+  bottlenecks?: string;
+  timeSavings?: string;
+}
+
+/* ============================================================
    DESIGN TOKENS — DoorScale Brand
    ============================================================ */
-const COLORS = {
+const COLORS: { [k: string]: string } = {
   primary: "#0F4C81",
   secondary: "#1E73BE",
   accent: "#D9EAF7",
@@ -47,15 +111,15 @@ const STEP_LABELS = [
   "Your Blueprint",
 ];
 
-function uid() {
+function uid(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function emptyStageData(stageNames) {
-  const obj = {};
+function emptyStageData(stageNames: string[]): StageDataMap {
+  const obj: StageDataMap = {};
   stageNames.forEach((s) => {
     obj[s] = {
-      purpose: "", entry: "", exit: "", delays: "", risk: "",
+      purpose: '', entry: '', exit: '', delays: '', risk: '',
       tasks: [],
       documents: [],
       communications: [],
@@ -206,7 +270,7 @@ const LOGO_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAIAAAD2
    SHARED UI PRIMITIVES
    ============================================================ */
 
-function GlobalStyle() {
+function GlobalStyle(): JSX.Element {
   return (
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
@@ -247,83 +311,100 @@ function GlobalStyle() {
   );
 }
 
-function PrimaryButton({ children, onClick, disabled, style, type = "button" }) {
+type ButtonProps = {
+  children?: React.ReactNode;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  disabled?: boolean;
+  style?: React.CSSProperties;
+  type?: 'button' | 'submit' | 'reset';
+};
+
+function PrimaryButton({ children, onClick, disabled, style, type = 'button' }: ButtonProps): JSX.Element {
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
       style={{
-        background: disabled ? "#9CA8B5" : COLORS.primary,
+        background: disabled ? '#9CA8B5' : COLORS.primary,
         color: COLORS.white,
-        border: "none",
+        border: 'none',
         borderRadius: 8,
-        padding: "13px 28px",
+        padding: '13px 28px',
         fontWeight: 700,
         fontSize: 15,
-        letterSpacing: "0.2px",
-        boxShadow: disabled ? "none" : "0 2px 8px rgba(15,76,129,0.25)",
-        transition: "transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease",
+        letterSpacing: '0.2px',
+        boxShadow: disabled ? 'none' : '0 2px 8px rgba(15,76,129,0.25)',
+        transition: 'transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease',
         ...style,
       }}
-      onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.background = COLORS.secondary; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-      onMouseLeave={(e) => { if (!disabled) { e.currentTarget.style.background = COLORS.primary; e.currentTarget.style.transform = "translateY(0)"; } }}
+      onMouseEnter={(e) => { if (!disabled) { (e.currentTarget as HTMLButtonElement).style.background = COLORS.secondary; (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; } }}
+      onMouseLeave={(e) => { if (!disabled) { (e.currentTarget as HTMLButtonElement).style.background = COLORS.primary; (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; } }}
     >
       {children}
     </button>
   );
 }
 
-function SecondaryButton({ children, onClick, style }) {
+function SecondaryButton({ children, onClick, style }: Omit<ButtonProps, 'disabled' | 'type'>): JSX.Element {
   return (
     <button
       onClick={onClick}
       style={{
-        background: "transparent",
+        background: 'transparent',
         color: COLORS.primary,
         border: `1.5px solid ${COLORS.primary}`,
         borderRadius: 8,
-        padding: "12px 26px",
+        padding: '12px 26px',
         fontWeight: 600,
         fontSize: 15,
-        transition: "background 0.15s ease",
+        transition: 'background 0.15s ease',
         ...style,
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = COLORS.accent; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = COLORS.accent; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
     >
       {children}
     </button>
   );
 }
 
-function GhostIconButton({ children, onClick, title, color }) {
+type GhostIconButtonProps = {
+  children?: React.ReactNode;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  title?: string;
+  color?: string;
+};
+
+function GhostIconButton({ children, onClick, title, color }: GhostIconButtonProps): JSX.Element {
   return (
     <button
       onClick={onClick}
       title={title}
       style={{
-        background: "transparent",
-        border: "none",
+        background: 'transparent',
+        border: 'none',
         color: color || COLORS.textMuted,
         fontSize: 13,
         fontWeight: 600,
-        padding: "4px 8px",
+        padding: '4px 8px',
         borderRadius: 6,
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = COLORS.bg; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = COLORS.bg; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
     >
       {children}
     </button>
   );
 }
 
-function Field({ label, hint, children }) {
+type FieldProps = { label?: string; hint?: string; children?: React.ReactNode };
+
+function Field({ label, hint, children }: FieldProps): JSX.Element {
   return (
     <div style={{ marginBottom: 18 }}>
       {label && (
-        <label style={{ display: "block", fontWeight: 600, fontSize: 13.5, marginBottom: 6, color: COLORS.text }}>
+        <label style={{ display: 'block', fontWeight: 600, fontSize: 13.5, marginBottom: 6, color: COLORS.text }}>
           {label}
         </label>
       )}
@@ -333,18 +414,20 @@ function Field({ label, hint, children }) {
   );
 }
 
-function CalloutBox({ children, label = "Insight" }) {
+type CalloutBoxProps = { children?: React.ReactNode; label?: string };
+
+function CalloutBox({ children, label = 'Insight' }: CalloutBoxProps): JSX.Element {
   return (
     <div
       style={{
         background: COLORS.accent,
         borderLeft: `4px solid ${COLORS.secondary}`,
         borderRadius: 8,
-        padding: "18px 22px",
-        margin: "28px 0",
+        padding: '18px 22px',
+        margin: '28px 0',
       }}
     >
-      <div style={{ fontFamily: FONT_HEAD, fontSize: 11, fontWeight: 700, letterSpacing: "1px", color: COLORS.primary, textTransform: "uppercase", marginBottom: 6 }}>
+      <div style={{ fontFamily: FONT_HEAD, fontSize: 11, fontWeight: 700, letterSpacing: '1px', color: COLORS.primary, textTransform: 'uppercase', marginBottom: 6 }}>
         {label}
       </div>
       <div style={{ fontSize: 15.5, lineHeight: 1.6, color: COLORS.navy, fontWeight: 500 }}>
@@ -354,50 +437,59 @@ function CalloutBox({ children, label = "Insight" }) {
   );
 }
 
-function SectionEyebrow({ children }) {
+function SectionEyebrow({ children }: { children?: React.ReactNode }): JSX.Element {
   return (
-    <div style={{ fontFamily: FONT_HEAD, fontSize: 12, fontWeight: 700, letterSpacing: "1.5px", color: COLORS.secondary, textTransform: "uppercase", marginBottom: 10 }}>
+    <div style={{ fontFamily: FONT_HEAD, fontSize: 12, fontWeight: 700, letterSpacing: '1.5px', color: COLORS.secondary, textTransform: 'uppercase', marginBottom: 10 }}>
       {children}
     </div>
   );
 }
 
-function PageTitle({ children }) {
+function PageTitle({ children }: { children?: React.ReactNode }): JSX.Element {
   return (
-    <h1 style={{ fontFamily: FONT_HEAD, fontSize: 32, fontWeight: 800, color: COLORS.navy, margin: "0 0 14px", lineHeight: 1.2 }}>
+    <h1 style={{ fontFamily: FONT_HEAD, fontSize: 32, fontWeight: 800, color: COLORS.navy, margin: '0 0 14px', lineHeight: 1.2 }}>
       {children}
     </h1>
   );
 }
 
-function PageSubtitle({ children }) {
+function PageSubtitle({ children }: { children?: React.ReactNode }): JSX.Element {
   return (
-    <p style={{ fontSize: 16.5, color: COLORS.textMuted, lineHeight: 1.6, margin: "0 0 32px", maxWidth: 680 }}>
+    <p style={{ fontSize: 16.5, color: COLORS.textMuted, lineHeight: 1.6, margin: '0 0 32px', maxWidth: 680 }}>
       {children}
     </p>
   );
 }
 
-function ProgressBar({ step, total }) {
+function ProgressBar({ step, total }: { step: number; total: number }): JSX.Element {
   const pct = Math.round((step / (total - 1)) * 100);
   return (
-    <div style={{ width: "100%" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+    <div style={{ width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.textMuted }}>
           Step {step} of {total - 1}
         </span>
         <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.secondary }}>{pct}% complete</span>
       </div>
-      <div style={{ height: 6, background: COLORS.line, borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${pct}%`, background: `linear-gradient(90deg, ${COLORS.secondary}, ${COLORS.primary})`, transition: "width 0.3s ease" }} />
+      <div style={{ height: 6, background: COLORS.line, borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${COLORS.secondary}, ${COLORS.primary})`, transition: 'width 0.3s ease' }} />
       </div>
     </div>
   );
 }
 
-function StepNav({ onBack, onNext, nextLabel = "Continue", backLabel = "Back", nextDisabled, hideBack }) {
+type StepNavProps = {
+  onBack?: () => void;
+  onNext?: () => void;
+  nextLabel?: string;
+  backLabel?: string;
+  nextDisabled?: boolean;
+  hideBack?: boolean;
+};
+
+function StepNav({ onBack, onNext, nextLabel = 'Continue', backLabel = 'Back', nextDisabled, hideBack }: StepNavProps): JSX.Element {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 40, paddingTop: 24, borderTop: `1px solid ${COLORS.line}` }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 40, paddingTop: 24, borderTop: `1px solid ${COLORS.line}` }}>
       {!hideBack ? <SecondaryButton onClick={onBack}>{backLabel}</SecondaryButton> : <div />}
       <PrimaryButton onClick={onNext} disabled={nextDisabled}>{nextLabel}</PrimaryButton>
     </div>
@@ -408,27 +500,27 @@ function StepNav({ onBack, onNext, nextLabel = "Continue", backLabel = "Back", n
    APP SHELL
    ============================================================ */
 
-function TopBar({ logo }) {
+function TopBar({ logo }: { logo: string }): JSX.Element {
   return (
     <div
       className="no-print"
       style={{
         background: COLORS.white,
         borderBottom: `1px solid ${COLORS.line}`,
-        padding: "14px 28px",
-        display: "flex",
-        alignItems: "center",
+        padding: '14px 28px',
+        display: 'flex',
+        alignItems: 'center',
         gap: 12,
-        position: "sticky",
+        position: 'sticky',
         top: 0,
         zIndex: 20,
       }}
     >
       <img src={logo} alt="DoorScale" style={{ width: 34, height: 34, borderRadius: 7 }} />
-      <div style={{ fontFamily: FONT_HEAD, fontWeight: 800, fontSize: 16, color: COLORS.navy, letterSpacing: "0.2px" }}>
+      <div style={{ fontFamily: FONT_HEAD, fontWeight: 800, fontSize: 16, color: COLORS.navy, letterSpacing: '0.2px' }}>
         DoorScale
       </div>
-      <div style={{ width: 1, height: 18, background: COLORS.line, margin: "0 6px" }} />
+      <div style={{ width: 1, height: 18, background: COLORS.line, margin: '0 6px' }} />
       <div style={{ fontSize: 13, color: COLORS.textMuted, fontWeight: 500 }}>
         Realtor Transaction Blueprint
       </div>
@@ -436,12 +528,12 @@ function TopBar({ logo }) {
   );
 }
 
-function Shell({ children, logo, step, total, showProgress = true }) {
+function Shell({ children, logo, step, total, showProgress = true }: { children?: React.ReactNode; logo: string; step: number; total: number; showProgress?: boolean }): JSX.Element {
   return (
-    <div className="ds-app" style={{ minHeight: "100%" }}>
+    <div className="ds-app" style={{ minHeight: '100%' }}>
       <GlobalStyle />
       <TopBar logo={logo} />
-      <div style={{ maxWidth: 760, margin: "0 auto", padding: "44px 24px 80px" }}>
+      <div style={{ maxWidth: 760, margin: '0 auto', padding: '44px 24px 80px' }}>
         {showProgress && (
           <div className="no-print" style={{ marginBottom: 36 }}>
             <ProgressBar step={step} total={total} />
@@ -457,35 +549,35 @@ function Shell({ children, logo, step, total, showProgress = true }) {
    LANDING PAGE
    ============================================================ */
 
-function LandingPage({ logo, onStart, onSeeSample }) {
+function LandingPage({ logo, onStart, onSeeSample }: { logo: string; onStart: () => void; onSeeSample: () => void }): JSX.Element {
   return (
-    <div className="ds-app" style={{ minHeight: "100%" }}>
+    <div className="ds-app" style={{ minHeight: '100%' }}>
       <GlobalStyle />
       <TopBar logo={logo} />
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "80px 24px 100px", textAlign: "center" }}>
+      <div style={{ maxWidth: 720, margin: '0 auto', padding: '80px 24px 100px', textAlign: 'center' }}>
         <div style={{
-          display: "inline-block", fontFamily: FONT_HEAD, fontSize: 12, fontWeight: 700,
-          letterSpacing: "1.5px", color: COLORS.secondary, textTransform: "uppercase",
-          background: COLORS.accent, padding: "7px 16px", borderRadius: 20, marginBottom: 24
+          display: 'inline-block', fontFamily: FONT_HEAD, fontSize: 12, fontWeight: 700,
+          letterSpacing: '1.5px', color: COLORS.secondary, textTransform: 'uppercase',
+          background: COLORS.accent, padding: '7px 16px', borderRadius: 20, marginBottom: 24
         }}>
           A Blueprint Builder for Real Estate Operators
         </div>
-        <h1 style={{ fontFamily: FONT_HEAD, fontSize: 42, fontWeight: 800, color: COLORS.navy, lineHeight: 1.18, margin: "0 0 20px" }}>
+        <h1 style={{ fontFamily: FONT_HEAD, fontSize: 42, fontWeight: 800, color: COLORS.navy, lineHeight: 1.18, margin: '0 0 20px' }}>
           The Realtor Transaction Blueprint
         </h1>
-        <p style={{ fontSize: 18, color: COLORS.textMuted, lineHeight: 1.65, maxWidth: 560, margin: "0 auto 40px" }}>
+        <p style={{ fontSize: 18, color: COLORS.textMuted, lineHeight: 1.65, maxWidth: 560, margin: '0 auto 40px' }}>
           Build a documented transaction process you can scale, delegate, automate, or hand off to a transaction coordinator.
         </p>
-        <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap", marginBottom: 56 }}>
-          <PrimaryButton onClick={onStart} style={{ padding: "15px 32px", fontSize: 16 }}>
+        <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 56 }}>
+          <PrimaryButton onClick={onStart} style={{ padding: '15px 32px', fontSize: 16 }}>
             Start Building My Blueprint
           </PrimaryButton>
-          <SecondaryButton onClick={onSeeSample} style={{ padding: "14px 30px", fontSize: 16 }}>
+          <SecondaryButton onClick={onSeeSample} style={{ padding: '14px 30px', fontSize: 16 }}>
             See Sample Blueprint
           </SecondaryButton>
         </div>
 
-        <div style={{ borderTop: `1px solid ${COLORS.line}`, paddingTop: 44, textAlign: "left" }}>
+        <div style={{ borderTop: `1px solid ${COLORS.line}`, paddingTop: 44, textAlign: 'left' }}>
           <SectionEyebrow>What this is</SectionEyebrow>
           <p style={{ fontSize: 15.5, color: COLORS.text, lineHeight: 1.7, marginBottom: 28 }}>
             Most Realtors don't need more leads. They need better systems around the opportunities they already have.
@@ -494,14 +586,14 @@ function LandingPage({ logo, onStart, onSeeSample }) {
             What you build here is yours to keep, whether or not you ever use DoorScale.
           </p>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 28 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 28 }}>
             {[
-              ["Not a CRM", "This doesn't manage your contacts or your pipeline of leads."],
-              ["Not a sales funnel", "Nothing here is designed to extract a sale from you."],
-              ["Not a transaction management system", "It's the blueprint you'd hand to one."],
-              ["A planning workshop", "Twenty minutes of focused thinking about how you actually work."],
+              ['Not a CRM', "This doesn't manage your contacts or your pipeline of leads."],
+              ['Not a sales funnel', "Nothing here is designed to extract a sale from you."],
+              ['Not a transaction management system', "It's the blueprint you'd hand to one."],
+              ['A planning workshop', 'Twenty minutes of focused thinking about how you actually work.'],
             ].map(([t, d]) => (
-              <div key={t} style={{ background: COLORS.white, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "16px 18px" }}>
+              <div key={String(t)} style={{ background: COLORS.white, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: '16px 18px' }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.navy, marginBottom: 4 }}>{t}</div>
                 <div style={{ fontSize: 13.5, color: COLORS.textMuted, lineHeight: 1.5 }}>{d}</div>
               </div>
@@ -521,9 +613,9 @@ function LandingPage({ logo, onStart, onSeeSample }) {
    STEP 1 — TRANSACTION SNAPSHOT
    ============================================================ */
 
-function StepSnapshot({ data, setData, onNext, onBack }) {
-  const update = (k, v) => setData((d) => ({ ...d, [k]: v }));
-  const valid = data.name && data.email;
+function StepSnapshot({ data, setData, onNext, onBack }: { data: Snapshot; setData: React.Dispatch<React.SetStateAction<Snapshot>>; onNext?: () => void; onBack?: () => void }): JSX.Element {
+  const update = (k: keyof Snapshot, v: string) => setData((d) => ({ ...d, [k]: v }));
+  const valid = Boolean(data.name && data.email);
 
   return (
     <div>
@@ -570,8 +662,8 @@ function StepSnapshot({ data, setData, onNext, onBack }) {
    STEP 2 — PIPELINE BUILDER
    ============================================================ */
 
-function StepPipeline({ stages, setStages, onNext, onBack }) {
-  const [newStage, setNewStage] = useState("");
+function StepPipeline({ stages, setStages, onNext, onBack }: { stages: string[]; setStages: React.Dispatch<React.SetStateAction<string[]>>; onNext?: () => void; onBack?: () => void }): JSX.Element {
+  const [newStage, setNewStage] = useState<string>("");
 
   const addStage = () => {
     const name = newStage.trim();
@@ -580,15 +672,15 @@ function StepPipeline({ stages, setStages, onNext, onBack }) {
     setNewStage("");
   };
 
-  const removeStage = (idx) => {
+  const removeStage = (idx: number) => {
     setStages((s) => s.filter((_, i) => i !== idx));
   };
 
-  const renameStage = (idx, val) => {
+  const renameStage = (idx: number, val: string) => {
     setStages((s) => s.map((x, i) => (i === idx ? val : x)));
   };
 
-  const move = (idx, dir) => {
+  const move = (idx: number, dir: number) => {
     setStages((s) => {
       const arr = [...s];
       const target = idx + dir;
@@ -662,16 +754,16 @@ function StepPipeline({ stages, setStages, onNext, onBack }) {
    STAGE SUB-NAV (used in steps 3-6)
    ============================================================ */
 
-function StageTabs({ stages, activeIdx, setActiveIdx }) {
+function StageTabs({ stages, activeIdx, setActiveIdx }: { stages: string[]; activeIdx: number; setActiveIdx: (i: number) => void }): JSX.Element {
   return (
-    <div className="ds-scroll" style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 28, paddingBottom: 4 }}>
+    <div className="ds-scroll" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 28, paddingBottom: 4 }}>
       {stages.map((s, i) => (
         <button
           key={i}
           onClick={() => setActiveIdx(i)}
           style={{
-            whiteSpace: "nowrap",
-            padding: "8px 14px",
+            whiteSpace: 'nowrap',
+            padding: '8px 14px',
             borderRadius: 7,
             border: `1.5px solid ${i === activeIdx ? COLORS.primary : COLORS.line}`,
             background: i === activeIdx ? COLORS.primary : COLORS.white,
@@ -691,12 +783,12 @@ function StageTabs({ stages, activeIdx, setActiveIdx }) {
    STEP 3 — STAGE PLANNER
    ============================================================ */
 
-function StepStagePlanner({ stages, stageData, setStageData, onNext, onBack }) {
-  const [activeIdx, setActiveIdx] = useState(0);
+function StepStagePlanner({ stages, stageData, setStageData, onNext, onBack }: { stages: string[]; stageData: StageDataMap; setStageData: React.Dispatch<React.SetStateAction<StageDataMap>>; onNext?: () => void; onBack?: () => void }): JSX.Element {
+  const [activeIdx, setActiveIdx] = useState<number>(0);
   const stageName = stages[activeIdx];
-  const current = stageData[stageName] || {};
+  const current: StageData = stageData[stageName] || { purpose: '', entry: '', exit: '', delays: '', risk: '', tasks: [], documents: [], communications: [] };
 
-  const update = (field, val) => {
+  const update = (field: keyof StageData, val: string) => {
     setStageData((d) => ({ ...d, [stageName]: { ...d[stageName], [field]: val } }));
   };
 
@@ -762,10 +854,10 @@ function StepStagePlanner({ stages, stageData, setStageData, onNext, onBack }) {
    STEP 4 — TASK CHECKLIST BUILDER
    ============================================================ */
 
-function TaskRow({ task, onChange, onRemove }) {
+function TaskRow({ task, onChange, onRemove }: { task: Task; onChange: (t: Task) => void; onRemove?: () => void }): JSX.Element {
   return (
     <div style={{ background: COLORS.bg, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 16, marginBottom: 12 }}>
-      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
         <input
           value={task.name}
           onChange={(e) => onChange({ ...task, name: e.target.value })}
@@ -781,7 +873,7 @@ function TaskRow({ task, onChange, onRemove }) {
         rows={2}
         style={{ marginBottom: 10 }}
       />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
         <input
           value={task.trigger}
           onChange={(e) => onChange({ ...task, trigger: e.target.value })}
@@ -800,17 +892,17 @@ function TaskRow({ task, onChange, onRemove }) {
   );
 }
 
-function StepTasks({ stages, stageData, setStageData, onNext, onBack }) {
-  const [activeIdx, setActiveIdx] = useState(0);
+function StepTasks({ stages, stageData, setStageData, onNext, onBack }: { stages: string[]; stageData: StageDataMap; setStageData: React.Dispatch<React.SetStateAction<StageDataMap>>; onNext?: () => void; onBack?: () => void }): JSX.Element {
+  const [activeIdx, setActiveIdx] = useState<number>(0);
   const stageName = stages[activeIdx];
-  const tasks = (stageData[stageName] && stageData[stageName].tasks) || [];
+  const tasks: Task[] = (stageData[stageName] && stageData[stageName].tasks) || [];
 
-  const setTasks = (newTasks) => {
+  const setTasks = (newTasks: Task[]) => {
     setStageData((d) => ({ ...d, [stageName]: { ...d[stageName], tasks: newTasks } }));
   };
 
   const addTask = () => {
-    setTasks([...tasks, { id: uid(), name: "", description: "", trigger: "", owner: "", requirement: "Required" }]);
+    setTasks([...tasks, { id: uid(), name: '', description: '', trigger: '', owner: '', requirement: 'Required' }]);
   };
 
   return (
@@ -823,12 +915,12 @@ function StepTasks({ stages, stageData, setStageData, onNext, onBack }) {
 
       <StageTabs stages={stages} activeIdx={activeIdx} setActiveIdx={setActiveIdx} />
 
-      <h3 style={{ fontFamily: FONT_HEAD, fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: "0 0 14px" }}>
+      <h3 style={{ fontFamily: FONT_HEAD, fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: '0 0 14px' }}>
         {stageName} — Tasks
       </h3>
 
       {tasks.length === 0 && (
-        <div style={{ color: COLORS.textMuted, fontSize: 14, fontStyle: "italic", marginBottom: 14 }}>
+        <div style={{ color: COLORS.textMuted, fontSize: 14, fontStyle: 'italic', marginBottom: 14 }}>
           No tasks added yet for this stage.
         </div>
       )}
@@ -842,7 +934,7 @@ function StepTasks({ stages, stageData, setStageData, onNext, onBack }) {
         />
       ))}
 
-      <SecondaryButton onClick={addTask} style={{ padding: "10px 20px", fontSize: 13.5 }}>
+      <SecondaryButton onClick={addTask} style={{ padding: '10px 20px', fontSize: 13.5 }}>
         + Add Task
       </SecondaryButton>
 
@@ -852,16 +944,16 @@ function StepTasks({ stages, stageData, setStageData, onNext, onBack }) {
         </CalloutBox>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
         <SecondaryButton
           onClick={() => setActiveIdx((i) => Math.max(0, i - 1))}
-          style={{ visibility: activeIdx === 0 ? "hidden" : "visible", padding: "9px 18px", fontSize: 13.5 }}
+          style={{ visibility: activeIdx === 0 ? 'hidden' : 'visible', padding: '9px 18px', fontSize: 13.5 }}
         >
           &larr; Previous Stage
         </SecondaryButton>
         <SecondaryButton
           onClick={() => setActiveIdx((i) => Math.min(stages.length - 1, i + 1))}
-          style={{ visibility: activeIdx === stages.length - 1 ? "hidden" : "visible", padding: "9px 18px", fontSize: 13.5 }}
+          style={{ visibility: activeIdx === stages.length - 1 ? 'hidden' : 'visible', padding: '9px 18px', fontSize: 13.5 }}
         >
           Next Stage &rarr;
         </SecondaryButton>
@@ -876,10 +968,10 @@ function StepTasks({ stages, stageData, setStageData, onNext, onBack }) {
    STEP 5 — DOCUMENT CHECKLIST BUILDER
    ============================================================ */
 
-function DocRow({ doc, onChange, onRemove }) {
+function DocRow({ doc, onChange, onRemove }: { doc: DocItem; onChange: (d: DocItem) => void; onRemove?: () => void }): JSX.Element {
   return (
     <div style={{ background: COLORS.bg, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 16, marginBottom: 12 }}>
-      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
         <input
           value={doc.name}
           onChange={(e) => onChange({ ...doc, name: e.target.value })}
@@ -888,11 +980,11 @@ function DocRow({ doc, onChange, onRemove }) {
         />
         <GhostIconButton onClick={onRemove} title="Remove document" color="#C0392B">Remove</GhostIconButton>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
         <input value={doc.collectedBy} onChange={(e) => onChange({ ...doc, collectedBy: e.target.value })} placeholder="Who collects it?" />
         <input value={doc.reviewedBy} onChange={(e) => onChange({ ...doc, reviewedBy: e.target.value })} placeholder="Who reviews it?" />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <input value={doc.storedWhere} onChange={(e) => onChange({ ...doc, storedWhere: e.target.value })} placeholder="Where is it stored?" />
         <input value={doc.accessNeeded} onChange={(e) => onChange({ ...doc, accessNeeded: e.target.value })} placeholder="Who needs access?" />
       </div>
@@ -900,17 +992,17 @@ function DocRow({ doc, onChange, onRemove }) {
   );
 }
 
-function StepDocuments({ stages, stageData, setStageData, onNext, onBack }) {
-  const [activeIdx, setActiveIdx] = useState(0);
+function StepDocuments({ stages, stageData, setStageData, onNext, onBack }: { stages: string[]; stageData: StageDataMap; setStageData: React.Dispatch<React.SetStateAction<StageDataMap>>; onNext?: () => void; onBack?: () => void }): JSX.Element {
+  const [activeIdx, setActiveIdx] = useState<number>(0);
   const stageName = stages[activeIdx];
-  const docs = (stageData[stageName] && stageData[stageName].documents) || [];
+  const docs: DocItem[] = (stageData[stageName] && stageData[stageName].documents) || [];
 
-  const setDocs = (newDocs) => {
+  const setDocs = (newDocs: DocItem[]) => {
     setStageData((d) => ({ ...d, [stageName]: { ...d[stageName], documents: newDocs } }));
   };
 
   const addDoc = () => {
-    setDocs([...docs, { id: uid(), name: "", collectedBy: "", reviewedBy: "", storedWhere: "", accessNeeded: "" }]);
+    setDocs([...docs, { id: uid(), name: '', collectedBy: '', reviewedBy: '', storedWhere: '', accessNeeded: '' }]);
   };
 
   return (
@@ -923,12 +1015,12 @@ function StepDocuments({ stages, stageData, setStageData, onNext, onBack }) {
 
       <StageTabs stages={stages} activeIdx={activeIdx} setActiveIdx={setActiveIdx} />
 
-      <h3 style={{ fontFamily: FONT_HEAD, fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: "0 0 14px" }}>
+      <h3 style={{ fontFamily: FONT_HEAD, fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: '0 0 14px' }}>
         {stageName} — Documents
       </h3>
 
       {docs.length === 0 && (
-        <div style={{ color: COLORS.textMuted, fontSize: 14, fontStyle: "italic", marginBottom: 14 }}>
+        <div style={{ color: COLORS.textMuted, fontSize: 14, fontStyle: 'italic', marginBottom: 14 }}>
           No documents added yet for this stage.
         </div>
       )}
@@ -942,7 +1034,7 @@ function StepDocuments({ stages, stageData, setStageData, onNext, onBack }) {
         />
       ))}
 
-      <SecondaryButton onClick={addDoc} style={{ padding: "10px 20px", fontSize: 13.5 }}>
+      <SecondaryButton onClick={addDoc} style={{ padding: '10px 20px', fontSize: 13.5 }}>
         + Add Document
       </SecondaryButton>
 
@@ -953,16 +1045,16 @@ function StepDocuments({ stages, stageData, setStageData, onNext, onBack }) {
         </CalloutBox>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
         <SecondaryButton
           onClick={() => setActiveIdx((i) => Math.max(0, i - 1))}
-          style={{ visibility: activeIdx === 0 ? "hidden" : "visible", padding: "9px 18px", fontSize: 13.5 }}
+          style={{ visibility: activeIdx === 0 ? 'hidden' : 'visible', padding: '9px 18px', fontSize: 13.5 }}
         >
           &larr; Previous Stage
         </SecondaryButton>
         <SecondaryButton
           onClick={() => setActiveIdx((i) => Math.min(stages.length - 1, i + 1))}
-          style={{ visibility: activeIdx === stages.length - 1 ? "hidden" : "visible", padding: "9px 18px", fontSize: 13.5 }}
+          style={{ visibility: activeIdx === stages.length - 1 ? 'hidden' : 'visible', padding: '9px 18px', fontSize: 13.5 }}
         >
           Next Stage &rarr;
         </SecondaryButton>
@@ -977,10 +1069,10 @@ function StepDocuments({ stages, stageData, setStageData, onNext, onBack }) {
    STEP 6 — COMMUNICATION BLUEPRINT
    ============================================================ */
 
-function CommRow({ comm, onChange, onRemove }) {
+function CommRow({ comm, onChange, onRemove }: { comm: CommItem; onChange: (c: CommItem) => void; onRemove?: () => void }): JSX.Element {
   return (
     <div style={{ background: COLORS.bg, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 16, marginBottom: 12 }}>
-      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
         <input
           value={comm.question}
           onChange={(e) => onChange({ ...comm, question: e.target.value })}
@@ -995,7 +1087,7 @@ function CommRow({ comm, onChange, onRemove }) {
         placeholder="What update should they receive?"
         style={{ marginBottom: 10 }}
       />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
         <select value={comm.sender} onChange={(e) => onChange({ ...comm, sender: e.target.value })}>
           <option value="">Who sends it?</option>
           {OWNERS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -1010,17 +1102,17 @@ function CommRow({ comm, onChange, onRemove }) {
   );
 }
 
-function StepCommunication({ stages, stageData, setStageData, onNext, onBack }) {
-  const [activeIdx, setActiveIdx] = useState(0);
+function StepCommunication({ stages, stageData, setStageData, onNext, onBack }: { stages: string[]; stageData: StageDataMap; setStageData: React.Dispatch<React.SetStateAction<StageDataMap>>; onNext?: () => void; onBack?: () => void }): JSX.Element {
+  const [activeIdx, setActiveIdx] = useState<number>(0);
   const stageName = stages[activeIdx];
-  const comms = (stageData[stageName] && stageData[stageName].communications) || [];
+  const comms: CommItem[] = (stageData[stageName] && stageData[stageName].communications) || [];
 
-  const setComms = (newComms) => {
+  const setComms = (newComms: CommItem[]) => {
     setStageData((d) => ({ ...d, [stageName]: { ...d[stageName], communications: newComms } }));
   };
 
   const addComm = () => {
-    setComms([...comms, { id: uid(), question: "", update: "", sender: "", timing: "", method: "" }]);
+    setComms([...comms, { id: uid(), question: '', update: '', sender: '', timing: '', method: '' }]);
   };
 
   return (
@@ -1034,12 +1126,12 @@ function StepCommunication({ stages, stageData, setStageData, onNext, onBack }) 
 
       <StageTabs stages={stages} activeIdx={activeIdx} setActiveIdx={setActiveIdx} />
 
-      <h3 style={{ fontFamily: FONT_HEAD, fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: "0 0 14px" }}>
+      <h3 style={{ fontFamily: FONT_HEAD, fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: '0 0 14px' }}>
         {stageName} — Communication Plan
       </h3>
 
       {comms.length === 0 && (
-        <div style={{ color: COLORS.textMuted, fontSize: 14, fontStyle: "italic", marginBottom: 14 }}>
+        <div style={{ color: COLORS.textMuted, fontSize: 14, fontStyle: 'italic', marginBottom: 14 }}>
           No communication items added yet for this stage.
         </div>
       )}
@@ -1053,26 +1145,26 @@ function StepCommunication({ stages, stageData, setStageData, onNext, onBack }) 
         />
       ))}
 
-      <SecondaryButton onClick={addComm} style={{ padding: "10px 20px", fontSize: 13.5 }}>
+      <SecondaryButton onClick={addComm} style={{ padding: '10px 20px', fontSize: 13.5 }}>
         + Add Communication Item
       </SecondaryButton>
 
-      {stageName.toLowerCase().includes("inspect") && comms.length === 0 && (
+      {stageName.toLowerCase().includes('inspect') && comms.length === 0 && (
         <CalloutBox label="Example — Inspection Stage">
           Common questions: "What happens next?" "When will I get the report?" "Can we negotiate repairs?"
         </CalloutBox>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
         <SecondaryButton
           onClick={() => setActiveIdx((i) => Math.max(0, i - 1))}
-          style={{ visibility: activeIdx === 0 ? "hidden" : "visible", padding: "9px 18px", fontSize: 13.5 }}
+          style={{ visibility: activeIdx === 0 ? 'hidden' : 'visible', padding: '9px 18px', fontSize: 13.5 }}
         >
           &larr; Previous Stage
         </SecondaryButton>
         <SecondaryButton
           onClick={() => setActiveIdx((i) => Math.min(stages.length - 1, i + 1))}
-          style={{ visibility: activeIdx === stages.length - 1 ? "hidden" : "visible", padding: "9px 18px", fontSize: 13.5 }}
+          style={{ visibility: activeIdx === stages.length - 1 ? 'hidden' : 'visible', padding: '9px 18px', fontSize: 13.5 }}
         >
           Next Stage &rarr;
         </SecondaryButton>
@@ -1087,19 +1179,19 @@ function StepCommunication({ stages, stageData, setStageData, onNext, onBack }) 
    STEP 7 — RESPONSIBILITY MATRIX
    ============================================================ */
 
-function StepResponsibility({ stages, stageData, onNext, onBack }) {
+function StepResponsibility({ stages, stageData, onNext, onBack }: { stages: string[]; stageData: StageDataMap; onNext?: () => void; onBack?: () => void }): JSX.Element {
   // Aggregate all tasks across all stages into one matrix
-  const allRows = [];
+  const allRows: { stage: string; task: string; owner: string }[] = [];
   stages.forEach((stageName) => {
     const tasks = (stageData[stageName] && stageData[stageName].tasks) || [];
     tasks.forEach((t) => {
       if (t.name.trim()) {
-        allRows.push({ stage: stageName, task: t.name, owner: t.owner || "Unassigned" });
+        allRows.push({ stage: stageName, task: t.name, owner: t.owner || 'Unassigned' });
       }
     });
   });
 
-  const ownerCounts = {};
+  const ownerCounts: Record<string, number> = {};
   allRows.forEach((r) => { ownerCounts[r.owner] = (ownerCounts[r.owner] || 0) + 1; });
 
   return (
@@ -1177,16 +1269,16 @@ function StepResponsibility({ stages, stageData, onNext, onBack }) {
    STEP 8 — FUTURE STATE PLANNING
    ============================================================ */
 
-function StepFutureState({ data, setData, onNext, onBack }) {
-  const update = (k, v) => setData((d) => ({ ...d, [k]: v }));
+function StepFutureState({ data, setData, onNext, onBack }: { data: FutureState; setData: React.Dispatch<React.SetStateAction<FutureState>>; onNext?: () => void; onBack?: () => void }): JSX.Element {
+  const update = (k: keyof FutureState, v: string) => setData((d) => ({ ...d, [k]: v }));
 
-  const questions = [
-    ["automate", "What would you automate?"],
-    ["delegate", "What would you delegate?"],
-    ["eliminate", "What would you eliminate?"],
-    ["stress", "What creates the most stress?"],
-    ["bottlenecks", "What creates the most bottlenecks?"],
-    ["timeSavings", "What would save the most time?"],
+  const questions: Array<[keyof FutureState, string]> = [
+    ['automate', 'What would you automate?'],
+    ['delegate', 'What would you delegate?'],
+    ['eliminate', 'What would you eliminate?'],
+    ['stress', 'What creates the most stress?'],
+    ['bottlenecks', 'What creates the most bottlenecks?'],
+    ['timeSavings', 'What would save the most time?'],
   ];
 
   return (
@@ -1218,7 +1310,7 @@ function StepFutureState({ data, setData, onNext, onBack }) {
    STEP 9 — LEAD CAPTURE (GHL EMBED)
    ============================================================ */
 
-function StepLeadCapture({ onUnlock, onBack }) {
+function StepLeadCapture({ onUnlock, onBack }: { onUnlock?: () => void; onBack?: () => void }): JSX.Element {
   return (
     <div>
       <SectionEyebrow>Step 9 of 9</SectionEyebrow>
@@ -1241,8 +1333,8 @@ function StepLeadCapture({ onUnlock, onBack }) {
           ───────────────────────────────────────────────────────────
         */}
         <div style={{
-          border: `2px dashed ${COLORS.line}`, borderRadius: 10, padding: "40px 24px",
-          textAlign: "center", color: COLORS.textMuted, fontSize: 14, marginBottom: 20
+          border: `2px dashed ${COLORS.line}`, borderRadius: 10, padding: '40px 24px',
+          textAlign: 'center', color: COLORS.textMuted, fontSize: 14, marginBottom: 20
         }}>
           <div style={{ fontWeight: 700, color: COLORS.navy, marginBottom: 8, fontFamily: FONT_HEAD }}>
             GHL Form Embed Placeholder
@@ -1250,7 +1342,7 @@ function StepLeadCapture({ onUnlock, onBack }) {
           Drop your GoHighLevel form embed code here. On submit, your blueprint will be tagged and synced automatically.
         </div>
 
-        <PrimaryButton onClick={onUnlock} style={{ width: "100%" }}>
+        <PrimaryButton onClick={onUnlock} style={{ width: '100%' }}>
           Continue to My Blueprint
         </PrimaryButton>
       </div>
@@ -1264,7 +1356,7 @@ function StepLeadCapture({ onUnlock, onBack }) {
    BLUEPRINT SUMMARY / RESULTS PAGE
    ============================================================ */
 
-function SummarySection({ title, children }) {
+function SummarySection({ title, children }: { title: string; children?: React.ReactNode }): JSX.Element {
   return (
     <div style={{ marginBottom: 36 }} className="print-page">
       <h2 style={{ fontFamily: FONT_HEAD, fontSize: 22, fontWeight: 800, color: COLORS.navy, margin: "0 0 16px", borderBottom: `2px solid ${COLORS.accent}`, paddingBottom: 10 }}>
@@ -1275,8 +1367,8 @@ function SummarySection({ title, children }) {
   );
 }
 
-function MiniTable({ headers, rows }) {
-  if (rows.length === 0) return <div style={{ color: COLORS.textMuted, fontSize: 13.5, fontStyle: "italic" }}>None recorded.</div>;
+function MiniTable({ headers, rows }: { headers: string[]; rows: Array<Array<string | undefined | null>> }): JSX.Element {
+  if (rows.length === 0) return <div style={{ color: COLORS.textMuted, fontSize: 13.5, fontStyle: 'italic' }}>None recorded.</div>;
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 18 }}>
       <thead>
@@ -1301,8 +1393,8 @@ function MiniTable({ headers, rows }) {
   );
 }
 
-function BlueprintSummary({ logo, snapshot, stages, stageData, futureState, onRestart }) {
-  const printRef = useRef(null);
+function BlueprintSummary({ logo, snapshot, stages, stageData, futureState, onRestart }: { logo: string; snapshot: Snapshot; stages: string[]; stageData: StageDataMap; futureState: FutureState; onRestart: () => void }): JSX.Element {
+  const printRef = useRef<HTMLDivElement | null>(null);
 
   const handlePrint = () => {
     window.print();
@@ -1311,11 +1403,11 @@ function BlueprintSummary({ logo, snapshot, stages, stageData, futureState, onRe
   const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 
   // Aggregate responsibility rows again for the summary
-  const allTaskRows = [];
+  const allTaskRows: { stage: string; task: string; owner: string }[] = [];
   stages.forEach((stageName) => {
     const tasks = (stageData[stageName] && stageData[stageName].tasks) || [];
     tasks.forEach((t) => {
-      if (t.name.trim()) allTaskRows.push({ stage: stageName, task: t.name, owner: t.owner || "Unassigned" });
+      if (t.name.trim()) allTaskRows.push({ stage: stageName, task: t.name, owner: t.owner || 'Unassigned' });
     });
   });
 
@@ -1522,29 +1614,29 @@ function BlueprintSummary({ logo, snapshot, stages, stageData, futureState, onRe
    MAIN APP
    ============================================================ */
 
-export default function RealtorTransactionBlueprint() {
-  const [screen, setScreen] = useState("landing"); // landing | wizard | summary
-  const [step, setStep] = useState(1); // 1-9 within wizard
+export default function RealtorTransactionBlueprint(): JSX.Element {
+  const [screen, setScreen] = useState<string>("landing"); // landing | wizard | summary
+  const [step, setStep] = useState<number>(1); // 1-9 within wizard
 
-  const [snapshot, setSnapshot] = useState({
-    name: "", email: "", brokerage: "", teamSize: "", activeTransactions: "",
-    currentMethod: "", stress: "", time: "",
+  const [snapshot, setSnapshot] = useState<Snapshot>({
+    name: '', email: '', brokerage: '', teamSize: '', activeTransactions: '',
+    currentMethod: '', stress: '', time: '',
   });
 
-  const [stages, setStages] = useState([...DEFAULT_STAGES]);
-  const [stageData, setStageData] = useState(() => emptyStageData(DEFAULT_STAGES));
-  const [futureState, setFutureState] = useState({
-    automate: "", delegate: "", eliminate: "", stress: "", bottlenecks: "", timeSavings: "",
+  const [stages, setStages] = useState<string[]>([...DEFAULT_STAGES]);
+  const [stageData, setStageData] = useState<StageDataMap>(() => emptyStageData(DEFAULT_STAGES));
+  const [futureState, setFutureState] = useState<FutureState>({
+    automate: '', delegate: '', eliminate: '', stress: '', bottlenecks: '', timeSavings: '',
   });
 
   // Keep stageData in sync if stages array changes (add/remove/rename)
-  const syncStageData = (newStages) => {
+  const syncStageData = (newStages: string[] | ((prev: string[]) => string[])) => {
     setStages((prevStages) => {
-      const resolved = typeof newStages === "function" ? newStages(prevStages) : newStages;
+      const resolved = typeof newStages === 'function' ? (newStages as (prev: string[]) => string[])(prevStages) : newStages;
       setStageData((old) => {
-        const next = {};
+        const next: StageDataMap = {};
         resolved.forEach((s) => {
-          next[s] = old[s] || { purpose: "", entry: "", exit: "", delays: "", risk: "", tasks: [], documents: [], communications: [] };
+          next[s] = old[s] || { purpose: '', entry: '', exit: '', delays: '', risk: '', tasks: [], documents: [], communications: [] };
         });
         return next;
       });
