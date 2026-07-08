@@ -93,6 +93,14 @@ type DuplicateOpportunityResponse = {
   };
 };
 
+type LocalTransactionMatch = {
+  id: string;
+};
+
+type TransactionLookupClient = {
+  from: (table: "transactions") => any;
+};
+
 const TRANSACTIONS_TABLE_COLUMNS = new Set([
   "assigned_to",
   "buyer_name",
@@ -204,12 +212,12 @@ function cleanTransactionPayload<T extends Record<string, unknown>>(payload: T) 
 }
 
 async function findExistingLocalTransaction(
-  supabase: ReturnType<typeof createClient>,
+  supabase: TransactionLookupClient,
   locationId: string,
   contactId?: string,
   opportunityId?: string,
   propertyAddress?: string,
-) {
+): Promise<LocalTransactionMatch | null> {
   if (opportunityId) {
     const { data, error } = await supabase
       .from("transactions")
@@ -224,7 +232,8 @@ async function findExistingLocalTransaction(
       console.error("Local duplicate transaction lookup failed:", error);
     }
 
-    if (data?.id) return data;
+    const transactionId = data?.id;
+    if (transactionId) return { id: String(transactionId) };
   }
 
   if (contactId) {
@@ -241,7 +250,8 @@ async function findExistingLocalTransaction(
       console.error("Local duplicate transaction contact lookup failed:", error);
     }
 
-    if (data?.id) return data;
+    const transactionId = data?.id;
+    if (transactionId) return { id: String(transactionId) };
 
     const { data: legacyContactData, error: legacyContactError } = await supabase
       .from("transactions")
@@ -259,7 +269,8 @@ async function findExistingLocalTransaction(
       );
     }
 
-    if (legacyContactData?.id) return legacyContactData;
+    const legacyTransactionId = legacyContactData?.id;
+    if (legacyTransactionId) return { id: String(legacyTransactionId) };
   }
 
   if (!propertyAddress?.trim()) return null;
@@ -277,7 +288,8 @@ async function findExistingLocalTransaction(
     console.error("Local duplicate transaction property lookup failed:", error);
   }
 
-  return data ?? null;
+  const transactionId = data?.id;
+  return transactionId ? { id: String(transactionId) } : null;
 }
 
 async function getPipelineConfig(accessToken: string, locationId: string) {
@@ -624,18 +636,22 @@ export default async function handler(
     routeName: "/api/ghl/transactions/create",
   });
 
-  const existingLocalTransaction = body.transactionId
-    ? null
-    : await findExistingLocalTransaction(
-        supabase,
-        activeLocationId,
-        contactId,
-        opportunityId,
-        body.propertyAddress,
-      );
-  const localTransactionId = body.transactionId || existingLocalTransaction?.id;
+  let existingLocalTransaction: LocalTransactionMatch | null = null;
 
-  if (existingLocalTransaction?.id) {
+  if (!body.transactionId) {
+    existingLocalTransaction = await findExistingLocalTransaction(
+      supabase,
+      activeLocationId,
+      contactId,
+      opportunityId,
+      body.propertyAddress,
+    );
+  }
+
+  const localTransactionId =
+    body.transactionId || existingLocalTransaction?.id || null;
+
+  if (existingLocalTransaction !== null) {
     console.log("Local duplicate transaction found; updating existing row:", {
       transactionId: existingLocalTransaction.id,
       locationId: activeLocationId,
