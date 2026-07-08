@@ -1638,6 +1638,36 @@
   font-weight: 700;
 }
 
+.document-page-row__main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.document-page-row__main small {
+  color: var(--ds-muted);
+  font-size: 0.78rem;
+}
+
+.document-page-row select {
+  min-height: 36px;
+  border: 1px solid var(--ds-border);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--ds-text);
+  background: #ffffff;
+  font-weight: 700;
+}
+
+.document-upload-label {
+  cursor: pointer;
+}
+
+.document-upload-label input {
+  display: none;
+}
+
 .document-page-list + .button {
   margin-top: 16px;
 }

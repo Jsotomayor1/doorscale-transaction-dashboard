@@ -201,6 +201,7 @@ export type TransactionDocument = {
   id: string;
   locationId: string;
   transactionId: string;
+  templateId: string;
   documentType: string;
   documentName: string;
   deliveryType: "workflow" | "manual_upload" | string;
@@ -256,6 +257,7 @@ type DocumentUploadResponse = {
     file_url?: string;
     id?: string;
     status?: string;
+    template_id?: string;
     uploaded_at?: string;
   };
   message?: string;
@@ -268,8 +270,12 @@ type DocumentStatusResponse = {
     document_type?: string;
     delivery_type?: string;
     doorscale_file_id?: string;
+    file_name?: string;
+    file_path?: string;
+    file_url?: string;
     id?: string;
     status?: string;
+    template_id?: string;
     uploaded_at?: string;
   };
   message?: string;
@@ -327,6 +333,7 @@ type SupabaseTransactionDocument = {
   id: string;
   location_id?: string | null;
   transaction_id: number | string | null;
+  template_id?: string | null;
   document_type: string | null;
   document_name: string | null;
   delivery_type?: string | null;
@@ -373,6 +380,7 @@ type SupabaseTaskTitle = {
 
 type SupabaseDocumentType = {
   document_type: string | null;
+  template_id?: string | null;
 };
 
 type CrmDataState = {
@@ -590,6 +598,7 @@ function mapSupabaseData(
       document.transaction_id === null || document.transaction_id === undefined
         ? ""
         : String(document.transaction_id),
+    templateId: document.template_id ?? "",
     documentType: document.document_type ?? "",
     documentName: document.document_name ?? "",
     deliveryType: document.delivery_type ?? "manual_upload",
@@ -719,6 +728,7 @@ function mapSupabaseDocument(document: SupabaseTransactionDocument): Transaction
       document.transaction_id === null || document.transaction_id === undefined
         ? ""
         : String(document.transaction_id),
+    templateId: document.template_id ?? "",
     documentType: document.document_type ?? "",
     documentName: document.document_name ?? "",
     deliveryType: document.delivery_type ?? "manual_upload",
@@ -800,7 +810,7 @@ async function loadLocationDocuments(
   return client
     .from("transaction_documents")
     .select(
-      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
+      "id, location_id, transaction_id, template_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
     )
     .eq("location_id", activeLocationId)
     .order("created_at", { ascending: false });
@@ -814,7 +824,7 @@ async function loadTransactionDocuments(
   return client
     .from("transaction_documents")
     .select(
-      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
+      "id, location_id, transaction_id, template_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
     )
     .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId)
@@ -1009,7 +1019,7 @@ async function generateDocumentChecklist(
     .select(
       "id, location_id, transaction_type, stage, stage_name, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
     )
-    .in("location_id", [activeLocationId, "global"])
+    .in("location_id", [activeLocationId, "global", "demo-location"])
     .order("sort_order", { ascending: true });
 
   if (templateError) {
@@ -1024,7 +1034,7 @@ async function generateDocumentChecklist(
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
       : templateRows.filter((template) =>
-          template.location_id === "global",
+          ["global", "demo-location"].includes(template.location_id ?? ""),
         );
   const normalizedTransactionType = transactionType.trim().toLowerCase();
   const normalizedStage = stage.trim().toLowerCase();
@@ -1035,10 +1045,8 @@ async function generateDocumentChecklist(
     const templateStage = (template.stage_name || template.stage)
       ?.trim()
       .toLowerCase();
-    const typeMatches =
-      !templateTransactionType ||
-      templateTransactionType === normalizedTransactionType;
-    const stageMatches = !templateStage || templateStage === normalizedStage;
+    const typeMatches = templateTransactionType === normalizedTransactionType;
+    const stageMatches = templateStage === normalizedStage;
 
     return typeMatches && stageMatches;
   });
@@ -1047,7 +1055,7 @@ async function generateDocumentChecklist(
 
   const { data: existingDocuments, error: existingDocumentsError } = await client
     .from("transaction_documents")
-    .select("document_type")
+    .select("document_type, template_id")
     .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId);
 
@@ -1060,15 +1068,24 @@ async function generateDocumentChecklist(
       .map((document) => document.document_type?.trim().toLowerCase())
       .filter(Boolean),
   );
+  const existingTemplateIds = new Set(
+    ((existingDocuments ?? []) as SupabaseDocumentType[])
+      .map((document) => document.template_id)
+      .filter(Boolean),
+  );
   const documentRows = documentTemplates
     .filter((template) => {
       const documentType = template.document_type?.trim().toLowerCase();
 
-      return documentType ? !existingTypes.has(documentType) : false;
+      if (!documentType) return false;
+      if (template.id && existingTemplateIds.has(template.id)) return false;
+
+      return !existingTypes.has(documentType);
     })
     .map((template) => ({
       location_id: activeLocationId,
       transaction_id: transactionId,
+      template_id: template.id,
       document_type: template.document_type,
       document_name: template.document_type,
       delivery_type: template.delivery_type || "manual_upload",
@@ -1837,10 +1854,26 @@ export function useCrmData() {
                     result.document?.doorScaleFileId ||
                     result.document?.doorscale_file_id ||
                     document.doorScaleFileId,
+                  fileName:
+                    result.document?.fileName ||
+                    result.document?.file_name ||
+                    document.fileName,
+                  filePath:
+                    result.document?.filePath ||
+                    result.document?.file_path ||
+                    document.filePath,
+                  fileUrl:
+                    result.document?.fileUrl ||
+                    result.document?.file_url ||
+                    document.fileUrl,
                   uploadedAt:
                     result.document?.uploadedAt ||
                     result.document?.uploaded_at ||
                     document.uploadedAt,
+                  templateId:
+                    result.document?.templateId ||
+                    result.document?.template_id ||
+                    document.templateId,
                 }
               : document,
           ),
@@ -1937,6 +1970,10 @@ export function useCrmData() {
                     result.document?.fileUrl ||
                     result.document?.file_url ||
                     document.fileUrl,
+                  templateId:
+                    result.document?.templateId ||
+                    result.document?.template_id ||
+                    document.templateId,
                   status: normalizeDocumentStatusValue(
                     result.document?.status ?? "uploaded",
                   ),
@@ -1995,28 +2032,26 @@ export function useCrmData() {
           return;
         }
 
-        if (!documentsResult.data?.length) {
-          await generateDocumentChecklist(
-            client,
-            locationId,
-            transactionId,
-            transactionType,
-            stage,
-          );
-          documentsResult = await loadTransactionDocuments(
-            client,
-            locationId,
-            transactionId,
-          );
+        await generateDocumentChecklist(
+          client,
+          locationId,
+          transactionId,
+          transactionType,
+          stage,
+        );
+        documentsResult = await loadTransactionDocuments(
+          client,
+          locationId,
+          transactionId,
+        );
 
-          if (documentsResult.error) {
-            console.warn("DoorScale transaction documents reload unavailable:", {
-              error: documentsResult.error,
-              locationId,
-              transactionId,
-            });
-            return;
-          }
+        if (documentsResult.error) {
+          console.warn("DoorScale transaction documents reload unavailable:", {
+            error: documentsResult.error,
+            locationId,
+            transactionId,
+          });
+          return;
         }
 
         const documents = ((documentsResult.data ?? []) as SupabaseTransactionDocument[])

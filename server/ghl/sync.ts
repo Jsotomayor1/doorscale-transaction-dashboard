@@ -896,13 +896,18 @@ function dedupeTasksByExternalId(tasks: TaskUpsertPayload[]) {
 type DocumentTemplate = {
   delivery_type?: string | null;
   document_type: string | null;
+  id?: string | null;
   location_id?: string | null;
+  stage?: string | null;
+  stage_name?: string | null;
+  transaction_type?: string | null;
   workflow_name?: string | null;
   workflow_trigger_tag?: string | null;
 };
 
 type ExistingDocument = {
   document_type: string | null;
+  template_id?: string | null;
 };
 
 async function generateDocumentChecklist(
@@ -919,11 +924,9 @@ async function generateDocumentChecklist(
   const { data: templates, error: templateError } = await db
     .from("document_templates")
     .select(
-      "document_type, delivery_type, workflow_trigger_tag, workflow_name, location_id",
+      "id, document_type, delivery_type, workflow_trigger_tag, workflow_name, location_id, transaction_type, stage, stage_name",
     )
-    .in("location_id", [locationId, "demo-location", "global"])
-    .eq("transaction_type", transaction.transaction_type)
-    .eq("stage", transaction.stage);
+    .in("location_id", [locationId, "demo-location", "global"]);
 
   if (templateError) {
     console.error("DoorScale document template lookup failed:", templateError);
@@ -940,14 +943,24 @@ async function generateDocumentChecklist(
       : templateRows.filter((template) =>
           ["demo-location", "global"].includes(template.location_id ?? ""),
         );
+  const normalizedType = transaction.transaction_type.trim().toLowerCase();
+  const normalizedStage = transaction.stage.trim().toLowerCase();
+  const matchingDocumentTemplates = documentTemplates.filter((template) => {
+    const templateType = template.transaction_type?.trim().toLowerCase();
+    const templateStage = (template.stage_name || template.stage)
+      ?.trim()
+      .toLowerCase();
 
-  if (!documentTemplates.length) {
+    return templateType === normalizedType && templateStage === normalizedStage;
+  });
+
+  if (!matchingDocumentTemplates.length) {
     return;
   }
 
   const { data: existingDocuments, error: existingDocumentsError } = await db
     .from("transaction_documents")
-    .select("document_type")
+    .select("document_type, template_id")
     .eq("location_id", locationId)
     .eq("transaction_id", transaction.id);
 
@@ -961,14 +974,23 @@ async function generateDocumentChecklist(
       .map((document) => document.document_type?.trim().toLowerCase())
       .filter(Boolean),
   );
-  const rows = documentTemplates
+  const existingTemplateIds = new Set(
+    ((existingDocuments ?? []) as ExistingDocument[])
+      .map((document) => document.template_id)
+      .filter(Boolean),
+  );
+  const rows = matchingDocumentTemplates
     .filter((template) => {
       const documentType = template.document_type?.trim().toLowerCase();
-      return documentType ? !existingTypes.has(documentType) : false;
+      if (!documentType) return false;
+      if (template.id && existingTemplateIds.has(template.id)) return false;
+
+      return !existingTypes.has(documentType);
     })
     .map((template) => ({
       location_id: locationId,
       transaction_id: transaction.id,
+      template_id: template.id,
       document_type: template.document_type,
       document_name: template.document_type,
       delivery_type: template.delivery_type || "manual_upload",

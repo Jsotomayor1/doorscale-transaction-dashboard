@@ -289,7 +289,7 @@ export default async function handler(
 
     const { data: documentRow, error: documentLookupError } = await supabase
       .from("transaction_documents")
-      .select("id, transaction_id, document_type, location_id, doorscale_contact_id")
+      .select("id, transaction_id, template_id, document_type, location_id, doorscale_contact_id")
       .eq("id", documentId)
       .eq("transaction_id", transactionId)
       .eq("location_id", activeLocation.activeLocationId)
@@ -387,7 +387,7 @@ export default async function handler(
       .eq("transaction_id", transactionId)
       .eq("location_id", activeLocation.activeLocationId)
       .select(
-        "id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag",
+        "id, transaction_id, template_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
       )
       .single();
 
