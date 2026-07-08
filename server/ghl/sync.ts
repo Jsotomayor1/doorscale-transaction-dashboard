@@ -222,6 +222,11 @@ type SyncedTransaction = {
   transaction_type?: string | null;
 };
 
+type TransactionMatch = {
+  id: string;
+  matchType: "opportunity_id" | "ghl_contact_id" | "contact_id" | "property_address";
+};
+
 type ExistingTask = {
   ghl_task_id: string;
   id: string;
@@ -994,19 +999,32 @@ async function saveSyncedTransactions(
   const syncedRows: SyncedTransaction[] = [];
 
   for (const transaction of payload) {
-    const { data: updatedRow, error: updateError } = await db
-      .from("transactions")
-      .update(transaction)
-      .eq("location_id", locationId)
-      .eq("ghl_opportunity_id", transaction.ghl_opportunity_id)
-      .select("id, ghl_opportunity_id, contact_id, transaction_type, stage")
-      .maybeSingle();
+    const existingMatch = await findSyncedTransactionMatch(
+      db,
+      transaction,
+      locationId,
+    );
 
-    if (updateError) {
-      throw updateError;
-    }
+    if (existingMatch) {
+      const { data: updatedRow, error: updateError } = await db
+        .from("transactions")
+        .update(transaction)
+        .eq("id", existingMatch.id)
+        .eq("location_id", locationId)
+        .select("id, ghl_opportunity_id, contact_id, transaction_type, stage")
+        .single();
 
-    if (updatedRow) {
+      if (updateError) {
+        throw updateError;
+      }
+
+      console.log("DoorScale sync updated existing transaction:", {
+        matchType: existingMatch.matchType,
+        transactionId: existingMatch.id,
+        ghl_opportunity_id: transaction.ghl_opportunity_id,
+        contact_id: transaction.contact_id,
+      });
+
       syncedRows.push(updatedRow as SyncedTransaction);
       continue;
     }
@@ -1025,6 +1043,53 @@ async function saveSyncedTransactions(
   }
 
   return syncedRows;
+}
+
+async function findSyncedTransactionMatch(
+  supabase: LooseSupabase,
+  transaction: TransactionUpsertPayload,
+  locationId: string,
+): Promise<TransactionMatch | null> {
+  const db = supabase as any;
+  const findBy = async (
+    matchType: TransactionMatch["matchType"],
+    column: string,
+    value: string | null | undefined,
+  ): Promise<TransactionMatch | null> => {
+    if (!value?.trim()) {
+      return null;
+    }
+
+    const { data, error } = await db
+      .from("transactions")
+      .select("id")
+      .eq("location_id", locationId)
+      .eq(column, value.trim())
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data?.id ? { id: String(data.id), matchType } : null;
+  };
+
+  return (
+    (await findBy(
+      "opportunity_id",
+      "ghl_opportunity_id",
+      transaction.ghl_opportunity_id,
+    )) ||
+    (await findBy("ghl_contact_id", "ghl_contact_id", transaction.ghl_contact_id)) ||
+    (await findBy("contact_id", "contact_id", transaction.contact_id)) ||
+    (await findBy(
+      "property_address",
+      "property_address",
+      transaction.property_address,
+    ))
+  );
 }
 
 async function saveSyncedTasks(
@@ -1244,8 +1309,7 @@ export default async function handler(
       .select(
         "id, ghl_opportunity_id, buyer_name, seller_name, transaction_type, closing_date, inspection_date, contact_id, ghl_contact_id, ghl_location_id, property_address, assigned_to, contact_name, contact_email, contact_phone, client_first_name, client_last_name, client_email, client_phone, commission, status",
       )
-      .eq("location_id", selectedLocationId)
-      .in("ghl_opportunity_id", opportunityIds);
+      .eq("location_id", selectedLocationId);
 
   if (existingTransactionsError) {
     console.error(
@@ -1264,18 +1328,45 @@ export default async function handler(
       (transaction) => [transaction.ghl_opportunity_id, transaction],
     ),
   );
+  const existingByGhlContactId = new Map(
+    ((existingTransactions ?? []) as ExistingTransaction[])
+      .filter((transaction) => Boolean(transaction.ghl_contact_id))
+      .map((transaction) => [transaction.ghl_contact_id as string, transaction]),
+  );
+  const existingByContactId = new Map(
+    ((existingTransactions ?? []) as ExistingTransaction[])
+      .filter((transaction) => Boolean(transaction.contact_id))
+      .map((transaction) => [transaction.contact_id as string, transaction]),
+  );
+  const existingByPropertyAddress = new Map(
+    ((existingTransactions ?? []) as ExistingTransaction[])
+      .filter((transaction) => Boolean(transaction.property_address?.trim()))
+      .map((transaction) => [
+        transaction.property_address?.trim().toLowerCase() as string,
+        transaction,
+      ]),
+  );
 
-  // Requires transactions.ghl_opportunity_id with a unique index so synced
-  // DoorScale opportunities can upsert into stable transaction rows.
+  const findExistingForOpportunity = (opportunity: DoorScaleOpportunity) => {
+    const opportunityId = opportunity.id;
+    const contactId = opportunity.contact_id ?? opportunity.contactId;
+    const propertyAddress = opportunity.name?.trim().toLowerCase();
+
+    return (
+      (opportunityId ? existingByOpportunityId.get(opportunityId) : undefined) ||
+      (contactId ? existingByGhlContactId.get(contactId) : undefined) ||
+      (contactId ? existingByContactId.get(contactId) : undefined) ||
+      (propertyAddress ? existingByPropertyAddress.get(propertyAddress) : undefined)
+    );
+  };
+
   const payload = syncableOpportunities
     .map((opportunity) =>
       mapOpportunityToTransaction(
         opportunity,
         selectedLocationId,
         stageMap,
-        opportunity.id
-          ? existingByOpportunityId.get(opportunity.id)
-          : undefined,
+        findExistingForOpportunity(opportunity),
       ),
     )
     .filter((transaction): transaction is TransactionUpsertPayload =>

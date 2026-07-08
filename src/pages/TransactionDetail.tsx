@@ -76,14 +76,14 @@ function stageVariant(stage: string) {
 }
 
 function getSyncLabel(syncStatus = "synced") {
-  if (syncStatus === "pending_sync") return "Pending Sync";
-  if (syncStatus === "sync_error") return "Sync Error";
+  if (syncStatus === "pending_sync") return "Pending";
+  if (syncStatus === "sync_error" || syncStatus === "failed") return "Failed";
   return "Synced";
 }
 
 function getSyncVariant(syncStatus = "synced") {
   if (syncStatus === "pending_sync") return "warning";
-  if (syncStatus === "sync_error") return "danger";
+  if (syncStatus === "sync_error" || syncStatus === "failed") return "danger";
   return "success";
 }
 

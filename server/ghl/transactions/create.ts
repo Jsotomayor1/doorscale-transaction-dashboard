@@ -210,15 +210,14 @@ async function findExistingLocalTransaction(
   opportunityId?: string,
   propertyAddress?: string,
 ) {
-  if (!contactId) return null;
-
   if (opportunityId) {
     const { data, error } = await supabase
       .from("transactions")
       .select("id")
       .eq("location_id", locationId)
-      .eq("ghl_contact_id", contactId)
       .eq("ghl_opportunity_id", opportunityId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (error) {
@@ -228,14 +227,50 @@ async function findExistingLocalTransaction(
     if (data?.id) return data;
   }
 
+  if (contactId) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("id")
+      .eq("location_id", locationId)
+      .eq("ghl_contact_id", contactId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Local duplicate transaction contact lookup failed:", error);
+    }
+
+    if (data?.id) return data;
+
+    const { data: legacyContactData, error: legacyContactError } = await supabase
+      .from("transactions")
+      .select("id")
+      .eq("location_id", locationId)
+      .eq("contact_id", contactId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (legacyContactError) {
+      console.error(
+        "Local duplicate transaction legacy contact lookup failed:",
+        legacyContactError,
+      );
+    }
+
+    if (legacyContactData?.id) return legacyContactData;
+  }
+
   if (!propertyAddress?.trim()) return null;
 
   const { data, error } = await supabase
     .from("transactions")
     .select("id")
     .eq("location_id", locationId)
-    .eq("ghl_contact_id", contactId)
     .eq("property_address", propertyAddress.trim())
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
