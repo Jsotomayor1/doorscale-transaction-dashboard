@@ -933,7 +933,9 @@ async function generateDocumentChecklist(
     .select(
       "id, document_type, delivery_type, workflow_trigger_tag, workflow_name, location_id, transaction_type, stage, stage_name",
     )
-    .in("location_id", [locationId, "demo-location", "global"]);
+    .or(
+      `location_id.eq.${locationId},location_id.eq.demo-location,location_id.eq.global,location_id.is.null`,
+    );
 
   if (templateError) {
     console.error("DoorScale document template lookup failed:", templateError);
@@ -958,7 +960,7 @@ async function generateDocumentChecklist(
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
       : matchingTemplates.filter((template) =>
-          ["demo-location", "global"].includes(template.location_id ?? ""),
+          ["demo-location", "global", ""].includes(template.location_id ?? ""),
         );
 
   if (!matchingDocumentTemplates.length) {

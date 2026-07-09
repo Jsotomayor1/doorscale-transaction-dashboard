@@ -466,10 +466,16 @@ export default async function handler(
   }
 
   const body = request.body as CreateTransactionBody;
+  const fallbackClientName = body.buyerName || body.sellerName || "";
+  const fallbackClientParts = fallbackClientName.trim().split(/\s+/);
+  const clientFirstName =
+    body.clientFirstName?.trim() || fallbackClientParts[0] || "";
+  const clientLastName =
+    body.clientLastName?.trim() || fallbackClientParts.slice(1).join(" ") || "";
 
   const missingFields = [
-    !body.clientFirstName?.trim() ? "Client First Name" : "",
-    !body.clientLastName?.trim() ? "Client Last Name" : "",
+    !clientFirstName ? "Client First Name" : "",
+    !clientLastName ? "Client Last Name" : "",
     !body.clientEmail?.trim() && !body.clientPhone?.trim()
       ? "Client Email or Client Phone"
       : "",
@@ -485,6 +491,9 @@ export default async function handler(
     });
     return;
   }
+
+  body.clientFirstName = clientFirstName;
+  body.clientLastName = clientLastName;
 
   const activeLocationId = getRequestedLocationId(request);
 

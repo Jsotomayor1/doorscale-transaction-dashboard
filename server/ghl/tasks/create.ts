@@ -211,6 +211,26 @@ export default async function handler(
   }
 
   if (saveError) {
+    console.error("Local task create failed with sync metadata; retrying with base task fields:", {
+      code: saveError.code,
+      details: saveError.details,
+      hint: saveError.hint,
+      message: saveError.message,
+    });
+    const baseTaskRow = {
+      assigned_to: body.assignedTo || null,
+      due_date: body.dueDate || (dueDateTime ? dueDateTime.slice(0, 10) : null),
+      location_id: transactionRow.location_id,
+      status: body.status || "pending",
+      title: body.title,
+      transaction_id: body.transactionId,
+    };
+    const fallbackResult = await saveTask(baseTaskRow);
+    savedTask = fallbackResult.data;
+    saveError = fallbackResult.error;
+  }
+
+  if (saveError) {
     console.error("Local task create failed:", {
       code: saveError.code,
       details: saveError.details,

@@ -539,7 +539,14 @@ function getClientName(transaction: SupabaseTransaction) {
     transaction.client_last_name,
   ].filter(Boolean).join(" ").trim();
 
-  return clientName || transaction.contact_name || "Unknown Client";
+  return (
+    clientName ||
+    transaction.contact_name ||
+    transaction.buyer_name ||
+    transaction.seller_name ||
+    transaction.property_address ||
+    "Unknown Client"
+  );
 }
 
 function toOpportunity(
@@ -817,11 +824,23 @@ async function loadLocationDocuments(
   client: SupabaseClient,
   activeLocationId: string,
 ) {
+  const baseSelect =
+    "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag";
+  const richSelect =
+    "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag";
+  const richResult = await client
+    .from("transaction_documents")
+    .select(richSelect)
+    .eq("location_id", activeLocationId)
+    .order("created_at", { ascending: false });
+
+  if (!richResult.error) return richResult;
+
+  console.warn("DoorScale document metadata columns unavailable; using base document fields.", richResult.error);
+
   return client
     .from("transaction_documents")
-    .select(
-      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
-    )
+    .select(baseSelect)
     .eq("location_id", activeLocationId)
     .order("created_at", { ascending: false });
 }
@@ -831,11 +850,24 @@ async function loadTransactionDocuments(
   activeLocationId: string,
   transactionId: string,
 ) {
+  const baseSelect =
+    "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, status, uploaded_at, created_at, workflow_name, workflow_trigger_tag";
+  const richSelect =
+    "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag";
+  const richResult = await client
+    .from("transaction_documents")
+    .select(richSelect)
+    .eq("location_id", activeLocationId)
+    .eq("transaction_id", transactionId)
+    .order("created_at", { ascending: false });
+
+  if (!richResult.error) return richResult;
+
+  console.warn("DoorScale transaction document metadata columns unavailable; using base document fields.", richResult.error);
+
   return client
     .from("transaction_documents")
-    .select(
-      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
-    )
+    .select(baseSelect)
     .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId)
     .order("created_at", { ascending: false });
@@ -945,7 +977,9 @@ async function generateChecklistTasks(
   const { data: templates, error: templateError } = await client
     .from("task_templates")
     .select("id, location_id, transaction_type, stage, title, days_offset, assigned_role, sort_order")
-    .in("location_id", [activeLocationId, "demo-location", "global"])
+    .or(
+      `location_id.eq.${activeLocationId},location_id.eq.demo-location,location_id.eq.global,location_id.is.null`,
+    )
     .order("sort_order", { ascending: true });
 
   if (templateError) {
@@ -969,7 +1003,7 @@ async function generateChecklistTasks(
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
       : matchingTemplates.filter((template) =>
-          ["demo-location", "global"].includes(template.location_id ?? ""),
+          ["demo-location", "global", ""].includes(template.location_id ?? ""),
         );
 
   if (!taskTemplates.length) return;
@@ -1034,7 +1068,9 @@ async function generateDocumentChecklist(
     .select(
       "id, location_id, transaction_type, stage, stage_name, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
     )
-    .in("location_id", [activeLocationId, "global", "demo-location"])
+    .or(
+      `location_id.eq.${activeLocationId},location_id.eq.global,location_id.eq.demo-location,location_id.is.null`,
+    )
     .order("sort_order", { ascending: true });
 
   if (templateError) {
@@ -1064,7 +1100,7 @@ async function generateDocumentChecklist(
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
       : matchingTemplates.filter((template) =>
-          ["global", "demo-location"].includes(template.location_id ?? ""),
+          ["global", "demo-location", ""].includes(template.location_id ?? ""),
         );
 
   if (!documentTemplates.length) return false;
@@ -1710,7 +1746,17 @@ export function useCrmData() {
       }
 
       const fields = transaction.customFields;
-      const clientNameParts = (transactionRow?.clientName || fields.contactName || "")
+      const fallbackContactName =
+        transactionRow?.clientName && transactionRow.clientName !== "Unknown Client"
+          ? transactionRow.clientName
+          : fields.contactName && fields.contactName !== "Unknown Client"
+            ? fields.contactName
+            : transactionRow?.buyerName ||
+              fields.buyerName ||
+              transactionRow?.sellerName ||
+              fields.sellerName ||
+              "";
+      const clientNameParts = fallbackContactName
         .trim()
         .split(/\s+/);
       const clientFirstName =
