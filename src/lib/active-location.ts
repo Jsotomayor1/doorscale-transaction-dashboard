@@ -1,6 +1,7 @@
 const ACTIVE_LOCATION_KEY = "active_location_id";
 const LEGACY_ACTIVE_LOCATION_KEY = "doorscale.activeLocationId";
 const ACTIVE_LOCATION_EVENT = "doorscale-active-location-change";
+const DASHBOARD_DATA_EVENT = "doorscale-dashboard-data-change";
 
 export function getUrlActiveLocationId() {
   return new URLSearchParams(window.location.search).get("location_id")?.trim() || "";
@@ -26,6 +27,10 @@ export function setStoredActiveLocationId(locationId: string) {
   window.dispatchEvent(new Event(ACTIVE_LOCATION_EVENT));
 }
 
+export function notifyDoorScaleDataChanged() {
+  window.dispatchEvent(new Event(DASHBOARD_DATA_EVENT));
+}
+
 export function getDoorScaleLocationHeaders(
   locationId = getStoredActiveLocationId(),
 ): Record<string, string> {
@@ -46,10 +51,12 @@ export function withActiveLocationPath(path: string) {
 
 export function subscribeToActiveLocationChange(callback: () => void) {
   window.addEventListener(ACTIVE_LOCATION_EVENT, callback);
+  window.addEventListener(DASHBOARD_DATA_EVENT, callback);
   window.addEventListener("storage", callback);
 
   return () => {
     window.removeEventListener(ACTIVE_LOCATION_EVENT, callback);
+    window.removeEventListener(DASHBOARD_DATA_EVENT, callback);
     window.removeEventListener("storage", callback);
   };
 }

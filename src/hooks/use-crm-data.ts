@@ -5,6 +5,7 @@ import {
   getDoorScaleLocationHeaders,
   getStoredActiveLocationId,
   getUrlActiveLocationId,
+  notifyDoorScaleDataChanged,
   setStoredActiveLocationId,
   subscribeToActiveLocationChange,
 } from "@/lib/active-location";
@@ -1449,6 +1450,7 @@ export function useCrmData() {
       );
 
       await refreshData();
+      notifyDoorScaleDataChanged();
 
       return result.ok === false
         ? result.message || "Stage saved locally. DoorScale sync will retry."
@@ -1894,6 +1896,7 @@ export function useCrmData() {
       }
 
       await refreshData();
+      notifyDoorScaleDataChanged();
 
       return result.ok === false
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."

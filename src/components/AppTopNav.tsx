@@ -15,6 +15,7 @@ import { useCRMData } from "@/hooks/use-crm-data";
 import {
   getDoorScaleLocationHeaders,
   getStoredActiveLocationId,
+  notifyDoorScaleDataChanged,
   setStoredActiveLocationId,
 } from "@/lib/active-location";
 import logoUrl from "@/assets/doorscale-tms-logo.png";
@@ -62,12 +63,18 @@ function getSyncMessage(result: SyncResponse) {
   }
 
   if (syncedTransactions > 0 || syncedTasks > 0) {
-    const transactionText = `${syncedTransactions} transaction${
-      syncedTransactions === 1 ? "" : "s"
-    } updated`;
-    const taskText = `${syncedTasks} task${syncedTasks === 1 ? "" : "s"} updated`;
+    if (syncedTasks > 0) {
+      const transactionText = `${syncedTransactions} transaction${
+        syncedTransactions === 1 ? "" : "s"
+      } updated`;
+      const taskText = `${syncedTasks} task${syncedTasks === 1 ? "" : "s"} updated`;
 
-    return `Sync complete: ${transactionText}, ${taskText}.`;
+      return `Sync complete. ${transactionText}. ${taskText}.`;
+    }
+
+    return `Sync complete. ${syncedTransactions} transaction${
+      syncedTransactions === 1 ? "" : "s"
+    } updated.`;
   }
 
   return result.message || "Sync complete.";
@@ -130,6 +137,7 @@ export function AppTopNav() {
 
       setSyncMessage(getSyncMessage(result));
       setStoredActiveLocationId(locationId);
+      notifyDoorScaleDataChanged();
     } catch (error) {
       setSyncMessage(
         error instanceof Error
