@@ -197,12 +197,6 @@ export default function TransactionDetail() {
       Boolean(document.id),
   );
 
-  console.log("Transaction detail document lookup:", {
-    activeLocationId: maybeActiveLocationId,
-    documentsReturnedCount: transactionDocumentsForCurrentTransaction.length,
-    transactionId: maybeTransactionId,
-  });
-
   useEffect(() => {
     let isMounted = true;
 
@@ -898,12 +892,6 @@ export default function TransactionDetail() {
                 </div>
               ) : null}
               {documentTrackingRows.map(({ document: documentRecord, documentType }) => {
-                console.log("Document row render", {
-                  activeLocationId,
-                  documentId: documentRecord?.id || null,
-                  documentStatus: documentRecord?.status || null,
-                  transactionId,
-                });
                 const inputId = `file-${documentRecord.id}`;
                 const statusOptions = [
                   ["needed", "Required"],
@@ -976,7 +964,6 @@ export default function TransactionDetail() {
                       <button
                         className="button button--secondary"
                         onClick={() => {
-                          console.log("upload clicked", documentRecord.id);
                           window.document
                             .getElementById(`file-${documentRecord.id}`)
                             ?.click();

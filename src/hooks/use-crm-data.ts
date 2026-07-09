@@ -374,7 +374,6 @@ type SupabaseDocumentTemplate = {
   location_id?: string | null;
   document_type: string | null;
   stage?: string | null;
-  stage_name?: string | null;
   transaction_type?: string | null;
   workflow_name?: string | null;
   workflow_trigger_tag?: string | null;
@@ -1063,13 +1062,18 @@ async function generateDocumentChecklist(
   transactionType: string,
   stage: string,
 ) {
+  const normalizedTransactionType = normalizeTemplateKey(transactionType);
+  const normalizedStage = normalizeTemplateKey(stage);
+  const templateLocationFilter =
+    `location_id.eq.${activeLocationId},location_id.eq.global,location_id.eq.demo-location,location_id.is.null`;
+
   const { data: templates, error: templateError } = await client
     .from("document_templates")
     .select(
-      "id, location_id, transaction_type, stage, stage_name, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
+      "id, location_id, transaction_type, stage, document_type, delivery_type, workflow_trigger_tag, workflow_name, sort_order",
     )
     .or(
-      `location_id.eq.${activeLocationId},location_id.eq.global,location_id.eq.demo-location,location_id.is.null`,
+      templateLocationFilter,
     )
     .order("sort_order", { ascending: true });
 
@@ -1078,15 +1082,11 @@ async function generateDocumentChecklist(
   }
 
   const templateRows = (templates ?? []) as SupabaseDocumentTemplate[];
-  const normalizedTransactionType = normalizeTemplateKey(transactionType);
-  const normalizedStage = normalizeTemplateKey(stage);
   const matchingTemplates = templateRows.filter((template) => {
     const templateTransactionType = normalizeTemplateKey(
       template.transaction_type ?? "",
     );
-    const templateStage = normalizeTemplateKey(
-      template.stage_name || template.stage || "",
-    );
+    const templateStage = normalizeTemplateKey(template.stage ?? "");
 
     return (
       templateTransactionType === normalizedTransactionType &&

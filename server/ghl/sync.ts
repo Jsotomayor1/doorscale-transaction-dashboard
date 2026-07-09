@@ -907,7 +907,6 @@ type DocumentTemplate = {
   id?: string | null;
   location_id?: string | null;
   stage?: string | null;
-  stage_name?: string | null;
   transaction_type?: string | null;
   workflow_name?: string | null;
   workflow_trigger_tag?: string | null;
@@ -931,7 +930,7 @@ async function generateDocumentChecklist(
   const { data: templates, error: templateError } = await db
     .from("document_templates")
     .select(
-      "id, document_type, delivery_type, workflow_trigger_tag, workflow_name, location_id, transaction_type, stage, stage_name",
+      "id, document_type, delivery_type, workflow_trigger_tag, workflow_name, location_id, transaction_type, stage",
     )
     .or(
       `location_id.eq.${locationId},location_id.eq.demo-location,location_id.eq.global,location_id.is.null`,
@@ -947,9 +946,7 @@ async function generateDocumentChecklist(
   const normalizedStage = normalizeTemplateKey(transaction.stage);
   const matchingTemplates = templateRows.filter((template) => {
     const templateType = normalizeTemplateKey(template.transaction_type ?? "");
-    const templateStage = normalizeTemplateKey(
-      template.stage_name || template.stage || "",
-    );
+    const templateStage = normalizeTemplateKey(template.stage ?? "");
 
     return templateType === normalizedType && templateStage === normalizedStage;
   });
