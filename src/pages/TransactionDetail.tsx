@@ -178,6 +178,7 @@ export default function TransactionDetail() {
   const [detailMessage, setDetailMessage] = useState("");
   const [detailError, setDetailError] = useState("");
   const [uploadingDocumentId, setUploadingDocumentId] = useState("");
+  const [manualDocumentName, setManualDocumentName] = useState("");
   const [isPreparingDocuments, setIsPreparingDocuments] = useState(false);
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
@@ -462,6 +463,35 @@ export default function TransactionDetail() {
       documentRecord.documentType,
       event,
     );
+  }
+
+  async function handleManualDocumentFileSelected(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    setDetailMessage("");
+    setDetailError("");
+    setUploadingDocumentId("manual");
+
+    try {
+      await data.uploadTransactionDocument({
+        documentType: manualDocumentName.trim() || file.name || "Uploaded Document",
+        file,
+        transactionId,
+      });
+      setManualDocumentName("");
+      setDetailMessage("Document uploaded.");
+    } catch (error) {
+      setDetailError(
+        error instanceof Error ? error.message : "Unable to upload document.",
+      );
+    } finally {
+      setUploadingDocumentId("");
+    }
   }
 
   const transactionNeedsSync =
@@ -889,9 +919,34 @@ export default function TransactionDetail() {
             <div className="placeholder-list">
               {!documentTrackingRows.length ? (
                 <div className="empty-state">
-                  {isPreparingDocuments
-                    ? "Preparing document checklist..."
-                    : "Document checklist is still preparing."}
+                  <p>
+                    {isPreparingDocuments
+                      ? "Preparing document checklist..."
+                      : "No document checklist templates found for this transaction yet."}
+                  </p>
+                  {!isPreparingDocuments ? (
+                    <div className="manual-document-upload">
+                      <input
+                        aria-label="Document name"
+                        onChange={(event) => setManualDocumentName(event.target.value)}
+                        placeholder="Document name or type"
+                        value={manualDocumentName}
+                      />
+                      <label className="button button--secondary document-upload-label">
+                        <Upload size={15} />
+                        {uploadingDocumentId === "manual"
+                          ? "Uploading..."
+                          : "Upload Document"}
+                        <input
+                          disabled={uploadingDocumentId === "manual"}
+                          onChange={(event) =>
+                            void handleManualDocumentFileSelected(event)
+                          }
+                          type="file"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {documentTrackingRows.map(({ document: documentRecord, documentType }) => {

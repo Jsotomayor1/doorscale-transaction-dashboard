@@ -24,6 +24,8 @@ type TransactionRow = {
   ghl_opportunity_id?: string | null;
   id: string;
   location_id: string;
+  stage?: string | null;
+  transaction_type?: string | null;
 };
 
 type DocumentRow = {
@@ -238,9 +240,13 @@ export default async function handler(
 
     const requestBuffer = await readRequestBuffer(request);
     const { fields, files } = parseMultipart(requestBuffer, boundary);
-    const documentId = (fields.document_id || fields.documentId)?.trim();
+    let documentId = (fields.document_id || fields.documentId)?.trim();
     const transactionId = (fields.transaction_id || fields.transactionId)?.trim();
-    const documentType = fields.documentType?.trim();
+    const documentType =
+      fields.documentType?.trim() ||
+      fields.document_type?.trim() ||
+      fields.documentName?.trim() ||
+      fields.document_name?.trim();
     const file = files.find((currentFile) => currentFile.name === "file");
 
     console.log("DoorScale document action received:", {
@@ -252,7 +258,7 @@ export default async function handler(
       uploadFileName: file?.filename || null,
     });
 
-    if (!documentId || !transactionId || !documentType || !file?.data.length) {
+    if (!transactionId || !documentType || !file?.data.length) {
       return response.status(400).json({
         message: "Choose a document file to upload.",
         ok: false,
@@ -261,7 +267,7 @@ export default async function handler(
 
     const { data: transaction, error: transactionError } = await supabase
       .from("transactions")
-      .select("id, location_id, ghl_contact_id, ghl_opportunity_id")
+      .select("id, location_id, ghl_contact_id, ghl_opportunity_id, stage, transaction_type")
       .eq("id", transactionId)
       .eq("location_id", activeLocation.activeLocationId)
       .maybeSingle();
@@ -287,32 +293,61 @@ export default async function handler(
       });
     }
 
-    const { data: documentRow, error: documentLookupError } = await supabase
-      .from("transaction_documents")
-      .select("id, transaction_id, document_type, location_id, doorscale_contact_id")
-      .eq("id", documentId)
-      .eq("transaction_id", transactionId)
-      .eq("location_id", activeLocation.activeLocationId)
-      .maybeSingle();
+    let documentRow: unknown = null;
 
-    if (documentLookupError) {
-      console.error("DoorScale document checklist lookup failed:", {
-        activeLocationId: activeLocation.activeLocationId,
-        documentId,
-        error: documentLookupError,
-        transactionId,
-      });
-      return response.status(500).json({
-        message: "Unable to upload document.",
-        ok: false,
-      });
+    if (documentId) {
+      const { data: existingDocumentRow, error: documentLookupError } = await supabase
+        .from("transaction_documents")
+        .select("id, transaction_id, document_type, location_id, doorscale_contact_id")
+        .eq("id", documentId)
+        .eq("transaction_id", transactionId)
+        .eq("location_id", activeLocation.activeLocationId)
+        .maybeSingle();
+
+      if (documentLookupError) {
+        console.error("DoorScale document checklist lookup failed:", {
+          activeLocationId: activeLocation.activeLocationId,
+          documentId,
+          error: documentLookupError,
+          transactionId,
+        });
+        return response.status(500).json({
+          message: "Unable to upload document.",
+          ok: false,
+        });
+      }
+
+      documentRow = existingDocumentRow;
     }
 
     if (!documentRow) {
-      return response.status(404).json({
-        message: "Document checklist item not found.",
-        ok: false,
-      });
+      const { data: createdDocumentRow, error: createDocumentError } = await supabase
+        .from("transaction_documents")
+        .insert({
+          document_name: documentType,
+          document_type: documentType,
+          doorscale_contact_id: transactionRow.ghl_contact_id ?? null,
+          location_id: activeLocation.activeLocationId,
+          status: "needed",
+          transaction_id: transactionId,
+        })
+        .select("id, transaction_id, document_type, location_id, doorscale_contact_id")
+        .single();
+
+      if (createDocumentError || !createdDocumentRow) {
+        console.error("DoorScale manual document row create failed:", {
+          activeLocationId: activeLocation.activeLocationId,
+          error: createDocumentError,
+          transactionId,
+        });
+        return response.status(500).json({
+          message: "Unable to upload document.",
+          ok: false,
+        });
+      }
+
+      documentRow = createdDocumentRow;
+      documentId = String(createdDocumentRow.id);
     }
 
     const documentRecord = documentRow as DocumentRow;

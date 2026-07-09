@@ -1687,6 +1687,25 @@
   display: none;
 }
 
+.manual-document-upload {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 0.85rem;
+}
+
+.manual-document-upload input[type="text"],
+.manual-document-upload > input {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  min-width: min(100%, 240px);
+  padding: 0.65rem 0.75rem;
+}
+
 .document-page-list + .button {
   margin-top: 16px;
 }

@@ -62,6 +62,9 @@ export default function Documents() {
     string[]
   >([]);
   const [uploadingDocumentId, setUploadingDocumentId] = useState("");
+  const [manualDocumentNames, setManualDocumentNames] = useState<
+    Record<string, string>
+  >({});
   const checklistKeys = useMemo(
     () =>
       transactions
@@ -164,6 +167,47 @@ export default function Documents() {
     }
   }
 
+  async function handleManualUpload(
+    event: ChangeEvent<HTMLInputElement>,
+    transaction: { id: string; stage: string; type: string },
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    const uploadKey = `manual-${transaction.id}`;
+    const documentType =
+      manualDocumentNames[transaction.id]?.trim() ||
+      file.name ||
+      "Uploaded Document";
+
+    setDocumentError("");
+    setDocumentMessage("");
+    setUploadingDocumentId(uploadKey);
+
+    try {
+      await uploadTransactionDocument({
+        documentType,
+        file,
+        transactionId: transaction.id,
+      });
+      setDocumentMessage("Document uploaded.");
+      setManualDocumentNames((currentNames) => ({
+        ...currentNames,
+        [transaction.id]: "",
+      }));
+    } catch (uploadError) {
+      setDocumentError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Unable to upload document.",
+      );
+    } finally {
+      setUploadingDocumentId("");
+    }
+  }
+
   return (
     <div className="dashboard">
       <header className="dashboard__header">
@@ -242,11 +286,41 @@ export default function Documents() {
                     </div>
                   ))}
                   {!transactionDocuments.length ? (
-                    <p className="empty-state">
-                      {isPreparing
-                        ? "Preparing document checklist..."
-                        : "No matching document templates for this transaction yet."}
-                    </p>
+                    <div className="empty-state">
+                      <p>
+                        {isPreparing
+                          ? "Preparing document checklist..."
+                          : "No document checklist templates found for this transaction yet."}
+                      </p>
+                      {!isPreparing ? (
+                        <div className="manual-document-upload">
+                          <input
+                            aria-label="Document name"
+                            onChange={(event) =>
+                              setManualDocumentNames((currentNames) => ({
+                                ...currentNames,
+                                [transaction.id]: event.target.value,
+                              }))
+                            }
+                            placeholder="Document name or type"
+                            value={manualDocumentNames[transaction.id] ?? ""}
+                          />
+                          <label className="button button--secondary document-upload-label">
+                            <Upload size={16} />
+                            {uploadingDocumentId === `manual-${transaction.id}`
+                              ? "Uploading..."
+                              : "Upload Document"}
+                            <input
+                              disabled={uploadingDocumentId === `manual-${transaction.id}`}
+                              onChange={(event) =>
+                                void handleManualUpload(event, transaction)
+                              }
+                              type="file"
+                            />
+                          </label>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
                 <Link

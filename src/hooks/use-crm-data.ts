@@ -66,7 +66,7 @@ export type UpdateDocumentStatusInput = {
 };
 
 export type UploadDocumentInput = {
-  documentId: string;
+  documentId?: string;
   documentType: string;
   file: File;
   transactionId: string;
@@ -257,14 +257,23 @@ type DocumentUploadResponse = {
     document_name?: string;
     document_type?: string;
     delivery_type?: string;
+    doorscale_contact_id?: string;
     doorscale_file_id?: string;
     file_name?: string;
     file_path?: string;
     file_url?: string;
+    ghl_contact_id?: string;
+    ghl_opportunity_id?: string;
     id?: string;
+    location_id?: string;
     status?: string;
     template_id?: string;
+    transaction_id?: string;
     uploaded_at?: string;
+    uploaded_by?: string;
+    workflow_name?: string;
+    workflow_trigger_tag?: string;
+    created_at?: string;
   };
   message?: string;
   ok?: boolean;
@@ -803,6 +812,95 @@ function mapSupabaseDocument(document: SupabaseTransactionDocument): Transaction
     workflowTriggerTag: document.workflow_trigger_tag ?? "",
     createdAt: document.created_at ?? "",
   };
+}
+
+function upsertUploadedDocument(
+  documents: TransactionDocument[],
+  document: DocumentUploadResponse["document"],
+  fallback: {
+    documentId: string;
+    documentType: string;
+    fileName: string;
+    locationId: string;
+    transactionId: string;
+  },
+) {
+  if (!document) return documents;
+
+  const documentId = String(document.id || fallback.documentId || "");
+  if (!documentId) return documents;
+
+  const uploadedDocument: TransactionDocument = {
+    createdAt: document.createdAt || document.created_at || "",
+    deliveryType: document.deliveryType || document.delivery_type || "manual_upload",
+    documentName:
+      document.documentName ||
+      document.document_name ||
+      fallback.documentType,
+    documentType:
+      document.documentType ||
+      document.document_type ||
+      fallback.documentType,
+    doorScaleContactId:
+      document.doorScaleContactId ||
+      document.doorscale_contact_id ||
+      "",
+    doorScaleFileId:
+      document.doorScaleFileId ||
+      document.doorscale_file_id ||
+      document.file_path ||
+      document.filePath ||
+      "",
+    fileName:
+      document.fileName ||
+      document.file_name ||
+      fallback.fileName,
+    filePath:
+      document.filePath ||
+      document.file_path ||
+      document.doorscale_file_id ||
+      "",
+    fileUrl: document.fileUrl || document.file_url || "",
+    ghlContactId: document.ghlContactId || document.ghl_contact_id || "",
+    ghlOpportunityId:
+      document.ghlOpportunityId ||
+      document.ghl_opportunity_id ||
+      "",
+    id: documentId,
+    locationId: document.locationId || document.location_id || fallback.locationId,
+    status: normalizeDocumentStatusValue(document.status ?? "uploaded"),
+    templateId: document.templateId || document.template_id || "",
+    transactionId: String(
+      document.transactionId ||
+        document.transaction_id ||
+        fallback.transactionId,
+    ),
+    uploadedAt:
+      document.uploadedAt ||
+      document.uploaded_at ||
+      new Date().toISOString(),
+    uploadedBy: document.uploadedBy || document.uploaded_by || "",
+    workflowName: document.workflowName || document.workflow_name || "",
+    workflowTriggerTag:
+      document.workflowTriggerTag || document.workflow_trigger_tag || "",
+  };
+
+  const existingIndex = documents.findIndex(
+    (currentDocument) => currentDocument.id === documentId,
+  );
+
+  if (existingIndex === -1) {
+    return [...documents, uploadedDocument];
+  }
+
+  return documents.map((currentDocument) =>
+    currentDocument.id === documentId
+      ? {
+          ...currentDocument,
+          ...uploadedDocument,
+        }
+      : currentDocument,
+  );
 }
 
 function mapDemoData(): CrmDataState {
@@ -2069,7 +2167,7 @@ export function useCrmData() {
   );
 
   const uploadTransactionDocument = useCallback(
-    async ({ documentId, documentType, file, transactionId }: UploadDocumentInput) => {
+    async ({ documentId = "", documentType, file, transactionId }: UploadDocumentInput) => {
       if (isDemoMode()) {
         const uploadedAt = new Date().toISOString();
 
@@ -2097,8 +2195,10 @@ export function useCrmData() {
 
       const formData = new FormData();
       formData.append("active_location_id", locationId);
-      formData.append("document_id", documentId);
-      formData.append("documentId", documentId);
+      if (documentId) {
+        formData.append("document_id", documentId);
+        formData.append("documentId", documentId);
+      }
       formData.append("documentType", documentType);
       formData.append("transaction_id", transactionId);
       formData.append("transactionId", transactionId);
@@ -2123,41 +2223,16 @@ export function useCrmData() {
       if (result.document) {
         setData((currentData) => ({
           ...currentData,
-          documents: currentData.documents.map((document) =>
-            document.id === documentId
-              ? {
-                  ...document,
-                  doorScaleFileId:
-                    result.document?.doorScaleFileId ||
-                    result.document?.doorscale_file_id ||
-                    result.document?.file_path ||
-                    result.document?.filePath ||
-                    document.doorScaleFileId,
-                  fileName:
-                    result.document?.fileName ||
-                    result.document?.file_name ||
-                    file.name,
-                  filePath:
-                    result.document?.filePath ||
-                    result.document?.file_path ||
-                    document.filePath,
-                  fileUrl:
-                    result.document?.fileUrl ||
-                    result.document?.file_url ||
-                    document.fileUrl,
-                  templateId:
-                    result.document?.templateId ||
-                    result.document?.template_id ||
-                    document.templateId,
-                  status: normalizeDocumentStatusValue(
-                    result.document?.status ?? "uploaded",
-                  ),
-                  uploadedAt:
-                    result.document?.uploadedAt ||
-                    result.document?.uploaded_at ||
-                    new Date().toISOString(),
-                }
-              : document,
+          documents: upsertUploadedDocument(
+            currentData.documents,
+            result.document,
+            {
+              documentId,
+              documentType,
+              fileName: file.name,
+              locationId,
+              transactionId,
+            },
           ),
         }));
         return {
