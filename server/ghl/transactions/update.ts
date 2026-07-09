@@ -95,6 +95,13 @@ type OpportunityResponse = {
   };
 };
 
+type DuplicateOpportunityResponse = {
+  message?: string | string[];
+  meta?: {
+    existingId?: string;
+  };
+};
+
 function getPipelineId(pipeline: Pipeline) {
   return pipeline.id ?? pipeline._id;
 }
@@ -144,6 +151,31 @@ function getContactId(result: unknown): string | null {
 
 function getOpportunityId(payload: OpportunityResponse) {
   return payload.id ?? payload.opportunity?.id ?? payload.opportunity?._id;
+}
+
+function parseJsonSafely<T>(rawBody: string): T | null {
+  try {
+    return JSON.parse(rawBody) as T;
+  } catch {
+    return null;
+  }
+}
+
+function getMessageText(message: string | string[] | undefined) {
+  return Array.isArray(message) ? message.join(" ") : message || "";
+}
+
+function getDuplicateOpportunityId(status: number, rawBody: string) {
+  if (status !== 400) return null;
+
+  const payload = parseJsonSafely<DuplicateOpportunityResponse>(rawBody);
+  const message = getMessageText(payload?.message);
+
+  if (!message.includes("Can not create duplicate opportunity for the contact")) {
+    return null;
+  }
+
+  return payload?.meta?.existingId || null;
 }
 
 function mapStatus(status?: string) {
@@ -241,6 +273,14 @@ function getSyncFields(body: UpdateTransactionBody, writeBackFailed: boolean) {
   };
 }
 
+function getSafeBodyPreview(rawBody: string) {
+  return rawBody.length > 2000 ? `${rawBody.slice(0, 2000)}...` : rawBody;
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "DoorScale sync failed.";
+}
+
 function buildOpportunityUpdate(
   body: UpdateTransactionBody,
   pipelineId?: string,
@@ -282,6 +322,13 @@ async function searchContact(
     }),
   });
   const rawBody = await searchResponse.text();
+
+  console.log("DoorScale contact search response:", {
+    body: getSafeBodyPreview(rawBody),
+    location_id: locationId,
+    queryType: email ? "email" : "phone",
+    status: searchResponse.status,
+  });
 
   if (!searchResponse.ok) {
     console.error("DoorScale contact search failed:", {
@@ -328,6 +375,10 @@ async function createContact(
     locationId,
     phone: body.clientPhone || undefined,
   };
+  console.log("DoorScale contact create request:", {
+    location_id: locationId,
+    payload: contactPayload,
+  });
   const contactResponse = await fetch(CONTACTS_URL, {
     method: "POST",
     headers: {
@@ -339,6 +390,12 @@ async function createContact(
     body: JSON.stringify(contactPayload),
   });
   const rawBody = await contactResponse.text();
+
+  console.log("DoorScale contact create response:", {
+    body: getSafeBodyPreview(rawBody),
+    location_id: locationId,
+    status: contactResponse.status,
+  });
 
   if (!contactResponse.ok) {
     console.error("DoorScale contact create failed:", {
@@ -363,6 +420,17 @@ async function updateContact(
   contactId: string,
   body: UpdateTransactionBody,
 ) {
+  const contactPayload = {
+    email: body.clientEmail || undefined,
+    firstName: body.clientFirstName || undefined,
+    lastName: body.clientLastName || undefined,
+    phone: body.clientPhone || undefined,
+  };
+  console.log("DoorScale contact update request:", {
+    contactId,
+    payload: contactPayload,
+  });
+
   const updateResponse = await fetch(`${CONTACTS_URL}${contactId}`, {
     method: "PUT",
     headers: {
@@ -371,14 +439,15 @@ async function updateContact(
       "Content-Type": "application/json",
       Version: API_VERSION,
     },
-    body: JSON.stringify({
-      email: body.clientEmail || undefined,
-      firstName: body.clientFirstName || undefined,
-      lastName: body.clientLastName || undefined,
-      phone: body.clientPhone || undefined,
-    }),
+    body: JSON.stringify(contactPayload),
   });
   const rawBody = await updateResponse.text();
+
+  console.log("DoorScale contact update response:", {
+    body: getSafeBodyPreview(rawBody),
+    contactId,
+    status: updateResponse.status,
+  });
 
   if (!updateResponse.ok) {
     console.error("DoorScale contact update failed:", {
@@ -476,12 +545,23 @@ export default async function handler(
 
   const transactionRow = transaction as TransactionRow;
   let writeBackFailed = false;
+  let syncErrorMessage = "";
   let contactId = transactionRow.ghl_contact_id ?? transactionRow.contact_id ?? undefined;
   let opportunityId = transactionRow.ghl_opportunity_id ?? undefined;
   let pipelineId: string | undefined;
   let pipelineStageId: string | undefined;
   let matchedPipelineStageId: string | undefined;
   let stageName: string | undefined;
+
+  console.log("DoorScale transaction update received:", {
+    existingGhlContactId: transactionRow.ghl_contact_id,
+    existingGhlOpportunityId: transactionRow.ghl_opportunity_id,
+    ghl_location_id: body.locationId ?? null,
+    location_id: activeLocationId,
+    stage: body.stage ?? transactionRow.stage,
+    transactionId: body.transactionId,
+    transactionType: body.transactionType ?? null,
+  });
 
   try {
     const connectedAccount = await getActiveLocation(
@@ -493,6 +573,13 @@ export default async function handler(
     if (connectedAccount.location_id !== transactionRow.location_id) {
       throw new Error("DoorScale account does not match this transaction.");
     }
+
+    console.log("DoorScale transaction update connection:", {
+      foundConnection: true,
+      hasPrivateIntegrationToken: Boolean(connectedAccount.access_token),
+      location_id: connectedAccount.location_id,
+      transactionId: body.transactionId,
+    });
 
     const selectedStage = body.stage || transactionRow.stage || "";
     stageName = selectedStage || undefined;
@@ -561,25 +648,44 @@ export default async function handler(
       });
       const rawBody = await createResponse.text();
       console.log("DoorScale opportunity create response:", {
-        body: rawBody,
+        body: getSafeBodyPreview(rawBody),
         endpoint: OPPORTUNITIES_URL,
         status: createResponse.status,
       });
 
       if (!createResponse.ok) {
-        console.error("DoorScale opportunity create failed:", {
-          body: rawBody,
+        const duplicateOpportunityId = getDuplicateOpportunityId(
+          createResponse.status,
+          rawBody,
+        );
+
+        if (duplicateOpportunityId) {
+          opportunityId = duplicateOpportunityId;
+          console.log("DoorScale duplicate opportunity detected during retry:", {
+            contactId,
+            existingOpportunityId: duplicateOpportunityId,
+            locationId: connectedAccount.location_id,
+            transactionId: body.transactionId,
+          });
+        } else {
+          console.error("DoorScale opportunity create failed:", {
+            body: getSafeBodyPreview(rawBody),
+            status: createResponse.status,
+            transactionId: body.transactionId,
+          });
+          throw new Error(`DoorScale opportunity create failed (${createResponse.status}).`);
+        }
+      } else {
+        opportunityId = getOpportunityId(JSON.parse(rawBody) as OpportunityResponse);
+        console.log("DoorScale opportunity created:", {
+          opportunityId,
           status: createResponse.status,
-          transactionId: body.transactionId,
         });
-        throw new Error("DoorScale opportunity create failed.");
       }
 
-      opportunityId = getOpportunityId(JSON.parse(rawBody) as OpportunityResponse);
-      console.log("DoorScale opportunity created:", {
-        opportunityId,
-        status: createResponse.status,
-      });
+      if (!opportunityId) {
+        throw new Error("DoorScale opportunity id was missing.");
+      }
     } else {
       const updateResponse = await fetch(
         `${OPPORTUNITIES_URL}${transactionRow.ghl_opportunity_id}`,
@@ -621,7 +727,15 @@ export default async function handler(
     }
   } catch (error) {
     writeBackFailed = true;
-    console.error("DoorScale transaction update write-back failed:", error);
+    syncErrorMessage = getErrorMessage(error);
+    console.error("DoorScale transaction update write-back failed:", {
+      error: syncErrorMessage,
+      finalGhlContactId: contactId ?? null,
+      finalGhlOpportunityId: opportunityId ?? null,
+      finalSyncStatus: "pending_sync",
+      location_id: activeLocationId,
+      transactionId: body.transactionId,
+    });
   }
 
   const clientName = [body.clientFirstName, body.clientLastName]
@@ -644,6 +758,7 @@ export default async function handler(
       ...(stageName ? { stage_name: stageName } : {}),
       ...(clientName ? { contact_name: clientName } : {}),
       ...getSyncFields(body, writeBackFailed),
+      ...(writeBackFailed ? { last_sync_error: syncErrorMessage } : {}),
     })
     .eq("id", body.transactionId)
     .eq("location_id", activeLocationId);
@@ -657,6 +772,13 @@ export default async function handler(
   response.status(200).json({
     ok: !writeBackFailed,
     message: getLocalSaveMessage(body, writeBackFailed),
+  });
+  console.log("DoorScale transaction update final sync state:", {
+    finalGhlContactId: contactId ?? null,
+    finalGhlOpportunityId: opportunityId ?? null,
+    finalSyncStatus: writeBackFailed ? "pending_sync" : "synced",
+    lastSyncError: writeBackFailed ? syncErrorMessage : null,
+    transactionId: body.transactionId,
   });
   logRouteDataCounts("/api/ghl/transactions/update", activeLocationId, {
     transactions: 1,

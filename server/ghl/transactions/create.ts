@@ -187,6 +187,14 @@ function getDuplicateOpportunityId(status: number, rawBody: string) {
   return payload?.meta?.existingId || null;
 }
 
+function getSafeBodyPreview(rawBody: string) {
+  return rawBody.length > 2000 ? `${rawBody.slice(0, 2000)}...` : rawBody;
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "DoorScale sync failed.";
+}
+
 function getContacts(payload: ContactSearchResponse) {
   if (Array.isArray(payload.contacts)) return payload.contacts;
   if (Array.isArray(payload.data)) return payload.data;
@@ -360,6 +368,13 @@ async function searchContact(
   });
   const rawBody = await searchResponse.text();
 
+  console.log("DoorScale contact search response:", {
+    body: getSafeBodyPreview(rawBody),
+    location_id: locationId,
+    queryType: email ? "email" : "phone",
+    status: searchResponse.status,
+  });
+
   if (!searchResponse.ok) {
     console.error("DoorScale contact search failed:", {
       body: rawBody,
@@ -383,11 +398,62 @@ async function searchContact(
   });
 }
 
+async function updateContact(
+  accessToken: string,
+  contactId: string,
+  body: CreateTransactionBody,
+) {
+  const contactPayload = {
+    email: body.clientEmail || undefined,
+    firstName: body.clientFirstName,
+    lastName: body.clientLastName,
+    phone: body.clientPhone || undefined,
+  };
+  console.log("DoorScale contact update request:", {
+    contactId,
+    payload: contactPayload,
+  });
+
+  const updateResponse = await fetch(`${CONTACTS_URL}${contactId}`, {
+    method: "PUT",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
+    },
+    body: JSON.stringify(contactPayload),
+  });
+  const rawBody = await updateResponse.text();
+
+  console.log("DoorScale contact update response:", {
+    body: getSafeBodyPreview(rawBody),
+    contactId,
+    status: updateResponse.status,
+  });
+
+  if (!updateResponse.ok) {
+    throw new Error(`DoorScale contact update failed (${updateResponse.status}).`);
+  }
+}
+
 async function createContact(
   accessToken: string,
   locationId: string,
   body: CreateTransactionBody,
 ) {
+  const contactPayload = {
+    email: body.clientEmail || undefined,
+    firstName: body.clientFirstName,
+    lastName: body.clientLastName,
+    locationId,
+    phone: body.clientPhone || undefined,
+  };
+  console.log("DoorScale contact create request:", {
+    location_id: locationId,
+    payload: contactPayload,
+  });
+
   const contactResponse = await fetch(CONTACTS_URL, {
     method: "POST",
     headers: {
@@ -396,15 +462,15 @@ async function createContact(
       "Content-Type": "application/json",
       Version: API_VERSION,
     },
-    body: JSON.stringify({
-      email: body.clientEmail || undefined,
-      firstName: body.clientFirstName,
-      lastName: body.clientLastName,
-      locationId,
-      phone: body.clientPhone || undefined,
-    }),
+    body: JSON.stringify(contactPayload),
   });
   const rawBody = await contactResponse.text();
+
+  console.log("DoorScale contact create response:", {
+    body: getSafeBodyPreview(rawBody),
+    location_id: locationId,
+    status: contactResponse.status,
+  });
 
   if (!contactResponse.ok) {
     console.error("DoorScale contact create failed:", {
@@ -430,7 +496,14 @@ async function findOrCreateContact(
   );
   const existingContactId = existingContact ? getContactId(existingContact) : undefined;
 
-  if (existingContactId) return existingContactId;
+  if (existingContactId) {
+    console.log("DoorScale contact found for transaction create:", {
+      contactId: existingContactId,
+      location_id: locationId,
+    });
+    await updateContact(accessToken, existingContactId, body);
+    return existingContactId;
+  }
 
   return createContact(accessToken, locationId, body);
 }
@@ -476,9 +549,6 @@ export default async function handler(
   const missingFields = [
     !clientFirstName ? "Client First Name" : "",
     !clientLastName ? "Client Last Name" : "",
-    !body.clientEmail?.trim() && !body.clientPhone?.trim()
-      ? "Client Email or Client Phone"
-      : "",
     !body.propertyAddress?.trim() ? "Property Address" : "",
     !body.transactionType?.trim() ? "Transaction Type" : "",
     !body.stage?.trim() ? "Stage" : "",
@@ -511,7 +581,17 @@ export default async function handler(
   let pipelineId: string | undefined;
   let pipelineStageId: string | undefined;
   let writeBackFailed = false;
+  let syncErrorMessage = "";
   let duplicateOpportunityHandled = false;
+
+  console.log("DoorScale transaction create received:", {
+    ghl_location_id: body.locationId ?? null,
+    location_id: activeLocationId,
+    propertyAddress: body.propertyAddress,
+    stage: body.stage,
+    transactionId: body.transactionId ?? null,
+    transactionType: body.transactionType,
+  });
 
   try {
     const connectedAccount = await getActiveLocation(
@@ -525,12 +605,27 @@ export default async function handler(
     }
 
     linkedLocationId = connectedAccount.location_id;
+    console.log("DoorScale transaction create connection:", {
+      foundConnection: true,
+      hasPrivateIntegrationToken: Boolean(connectedAccount.access_token),
+      location_id: connectedAccount.location_id,
+      transactionId: body.transactionId ?? null,
+    });
+
     const pipelineConfig = await getPipelineConfig(
       connectedAccount.access_token,
       connectedAccount.location_id,
     );
     pipelineId = pipelineConfig.pipelineId;
     pipelineStageId = pipelineConfig.stageMap.get(normalize(body.stage));
+
+    console.log("DoorScale transaction create pipeline mapping:", {
+      location_id: connectedAccount.location_id,
+      matchedPipelineId: pipelineId ?? null,
+      matchedPipelineStageId: pipelineStageId ?? null,
+      selectedStage: body.stage,
+      transactionId: body.transactionId ?? null,
+    });
 
     if (!pipelineId || !pipelineStageId) {
       throw new Error("DoorScale stage could not be matched.");
@@ -546,6 +641,21 @@ export default async function handler(
       throw new Error("DoorScale contact could not be created.");
     }
 
+    const opportunityPayload = {
+      contactId,
+      locationId: connectedAccount.location_id,
+      monetaryValue: Number(body.commission || 0),
+      name: getOpportunityName(body),
+      pipelineId,
+      pipelineStageId,
+      status: "open",
+    };
+    console.log("DoorScale opportunity create request:", {
+      endpoint: OPPORTUNITIES_URL,
+      payload: opportunityPayload,
+      transactionId: body.transactionId ?? null,
+    });
+
     const createResponse = await fetch(OPPORTUNITIES_URL, {
       method: "POST",
       headers: {
@@ -554,17 +664,15 @@ export default async function handler(
         "Content-Type": "application/json",
         Version: API_VERSION,
       },
-      body: JSON.stringify({
-        contactId,
-        locationId: connectedAccount.location_id,
-        monetaryValue: Number(body.commission || 0),
-        name: getOpportunityName(body),
-        pipelineId,
-        pipelineStageId,
-        status: "open",
-      }),
+      body: JSON.stringify(opportunityPayload),
     });
     const rawBody = await createResponse.text();
+    console.log("DoorScale opportunity create response:", {
+      body: getSafeBodyPreview(rawBody),
+      endpoint: OPPORTUNITIES_URL,
+      status: createResponse.status,
+      transactionId: body.transactionId ?? null,
+    });
 
     if (!createResponse.ok) {
       const duplicateOpportunityId = getDuplicateOpportunityId(
@@ -608,7 +716,16 @@ export default async function handler(
     }
   } catch (error) {
     writeBackFailed = true;
-    console.error("DoorScale transaction create write-back failed:", error);
+    syncErrorMessage = getErrorMessage(error);
+    console.error("DoorScale transaction create write-back failed:", {
+      error: syncErrorMessage,
+      finalGhlContactId: contactId ?? null,
+      finalGhlOpportunityId: opportunityId ?? null,
+      finalSyncStatus: "pending_sync",
+      ghl_location_id: linkedLocationId,
+      location_id: activeLocationId,
+      transactionId: body.transactionId ?? null,
+    });
   }
 
   const clientName = [body.clientFirstName, body.clientLastName]
@@ -640,9 +757,7 @@ export default async function handler(
     stage_name: body.stage,
     status: body.status || "active",
     sync_status: writeBackFailed ? "pending_sync" : "synced",
-    last_sync_error: writeBackFailed
-      ? "Transaction saved locally. DoorScale sync will retry later."
-      : null,
+    last_sync_error: writeBackFailed ? syncErrorMessage : null,
     last_synced_at: writeBackFailed ? null : new Date().toISOString(),
     transaction_type: body.transactionType,
   });
@@ -695,7 +810,10 @@ export default async function handler(
 
   console.log("Local transaction saved:", {
     duplicateOpportunityHandled,
+    finalGhlContactId: contactId ?? null,
     ghl_opportunity_id: opportunityId ?? null,
+    finalSyncStatus: writeBackFailed ? "pending_sync" : "synced",
+    lastSyncError: writeBackFailed ? syncErrorMessage : null,
     mode: localTransactionId ? "updated" : "inserted",
     transactionId: savedTransaction?.id,
   });

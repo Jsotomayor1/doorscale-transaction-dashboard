@@ -80,8 +80,10 @@ export async function getActiveLocation(
 
   console.log("DoorScale active account lookup:", {
     foundConnection: Boolean(row),
+    hasPrivateIntegrationToken: Boolean(row?.access_token),
     requestedLocationId: requestedLocationId || null,
     routeName,
+    userType: row?.user_type ?? null,
   });
 
   if (!row?.location_id || !row.access_token) {
