@@ -869,7 +869,7 @@ export default async function handler(
     .filter(Boolean)
     .join(" ")
     .trim();
-  const { error: updateError } = await supabase
+  const { data: updatedTransaction, error: updateError } = await supabase
     .from("transactions")
     .update({
       ...buildLocalUpdate(body),
@@ -888,7 +888,9 @@ export default async function handler(
       ...(writeBackFailed ? { last_sync_error: syncErrorMessage } : {}),
     })
     .eq("id", body.transactionId)
-    .eq("location_id", activeLocationId);
+    .eq("location_id", activeLocationId)
+    .select("*")
+    .single();
 
   if (updateError) {
     console.error("Local transaction update failed:", updateError);
@@ -899,6 +901,8 @@ export default async function handler(
   response.status(200).json({
     ok: !writeBackFailed,
     message: getLocalSaveMessage(body, writeBackFailed),
+    transaction: updatedTransaction,
+    transactionId: updatedTransaction?.id ?? body.transactionId,
   });
   console.log("DoorScale transaction update final sync state:", {
     finalGhlContactId: contactId ?? null,

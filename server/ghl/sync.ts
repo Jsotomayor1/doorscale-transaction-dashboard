@@ -1310,9 +1310,18 @@ export default async function handler(
     .filter((id): id is string => Boolean(id));
 
   if (!opportunityIds.length || !syncableOpportunities.length) {
+    console.log("DoorScale global sync completed with no CRM opportunities:", {
+      endpoint: opportunitiesUrl.toString(),
+      errors: 0,
+      opportunityCount,
+      pipelineIdUsed,
+      pipelineNameUsed,
+      skippedOpportunities,
+      syncedTransactions: 0,
+    });
     response.status(200).json({
       ok: true,
-      message: "DoorScale data synced successfully.",
+      message: "No CRM opportunities found.",
       syncedTransactions: 0,
       syncedTasks: 0,
       skippedTasks: 0,
@@ -1320,6 +1329,11 @@ export default async function handler(
       pipelineNameUsed,
       pipelineIdUsed,
       skippedOpportunities,
+    });
+    logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
+      documents: 0,
+      tasks: 0,
+      transactions: 0,
     });
     return;
   }
@@ -1469,7 +1483,10 @@ export default async function handler(
 
     response.status(200).json({
       ok: true,
-      message: "DoorScale data synced successfully.",
+      message:
+        syncedTransactionRows.length > 0
+          ? `${syncedTransactionRows.length} transactions updated.`
+          : "Sync complete.",
       syncedTransactions: syncedTransactionRows.length,
       syncedTasks,
       skippedTasks,
@@ -1477,6 +1494,15 @@ export default async function handler(
       pipelineNameUsed,
       pipelineIdUsed,
       skippedOpportunities,
+    });
+    console.log("DoorScale global sync completed:", {
+      errors: 0,
+      opportunityCount,
+      pipelineIdUsed,
+      pipelineNameUsed,
+      skippedOpportunities,
+      syncedTasks,
+      syncedTransactions: syncedTransactionRows.length,
     });
     logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
       documents: syncedTransactionRows.length,
@@ -1488,7 +1514,7 @@ export default async function handler(
 
   response.status(200).json({
     ok: true,
-    message: "DoorScale data synced successfully.",
+    message: "Sync complete.",
     syncedTransactions: 0,
     syncedTasks: 0,
     skippedTasks: 0,
@@ -1496,6 +1522,15 @@ export default async function handler(
     pipelineNameUsed,
     pipelineIdUsed,
     skippedOpportunities,
+  });
+  console.log("DoorScale global sync completed without local updates:", {
+    errors: 0,
+    opportunityCount,
+    pipelineIdUsed,
+    pipelineNameUsed,
+    skippedOpportunities,
+    syncedTasks: 0,
+    syncedTransactions: 0,
   });
   logRouteDataCounts("/api/ghl/sync", selectedLocationId, {
     documents: 0,

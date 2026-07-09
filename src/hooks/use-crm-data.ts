@@ -246,6 +246,7 @@ type TaskWriteResponse = {
 type TransactionWriteResponse = {
   message?: string;
   ok?: boolean;
+  transaction?: Partial<SupabaseTransaction>;
   transactionId?: string;
 };
 
@@ -724,6 +725,51 @@ function mapSupabaseData(
       };
     }),
     documents,
+  };
+}
+
+function mergeSyncedTransaction(
+  currentData: CrmDataState,
+  transaction: Partial<SupabaseTransaction>,
+): CrmDataState {
+  if (!transaction.id) return currentData;
+
+  const mappedTransaction = mapSupabaseData(
+    [transaction as SupabaseTransaction],
+    [],
+    [],
+  ).transactions[0];
+  const mappedOpportunity = toOpportunity(transaction as SupabaseTransaction, []);
+
+  return {
+    ...currentData,
+    transactions: currentData.transactions.map((currentTransaction) =>
+      String(currentTransaction.id) === String(transaction.id)
+        ? {
+            ...currentTransaction,
+            ghlContactId: mappedTransaction.ghlContactId,
+            ghlLocationId: mappedTransaction.ghlLocationId,
+            ghlOpportunityId: mappedTransaction.ghlOpportunityId,
+            lastSyncError: mappedTransaction.lastSyncError,
+            lastSyncedAt: mappedTransaction.lastSyncedAt,
+            syncStatus: mappedTransaction.syncStatus,
+          }
+        : currentTransaction,
+    ),
+    opportunities: currentData.opportunities.map((currentOpportunity) =>
+      String(currentOpportunity.id) === String(transaction.id)
+        ? {
+            ...currentOpportunity,
+            contactId: mappedOpportunity.contactId,
+            ghlContactId: mappedOpportunity.ghlContactId,
+            ghlLocationId: mappedOpportunity.ghlLocationId,
+            ghlOpportunityId: mappedOpportunity.ghlOpportunityId,
+            lastSyncError: mappedOpportunity.lastSyncError,
+            lastSyncedAt: mappedOpportunity.lastSyncedAt,
+            syncStatus: mappedOpportunity.syncStatus,
+          }
+        : currentOpportunity,
+    ),
   };
 }
 
@@ -1840,6 +1886,12 @@ export function useCrmData() {
         }),
       }, 30000);
       const result = await parseTransactionWriteResponse(response);
+
+      if (result.transaction) {
+        setData((currentData) =>
+          mergeSyncedTransaction(currentData, result.transaction ?? {}),
+        );
+      }
 
       await refreshData();
 
