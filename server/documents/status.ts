@@ -90,7 +90,7 @@ export default async function handler(
 
     const { data: updatedDocument, error } = await query
       .select(
-        "id, transaction_id, template_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
+        "id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
       )
       .single();
 

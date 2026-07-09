@@ -232,15 +232,15 @@ export default function TransactionDetail() {
       }
     }
 
-    if (!transactionDocumentsForCurrentTransaction.length) {
-      void prepareDocuments();
-    }
+    void prepareDocuments();
 
     return () => {
       isMounted = false;
     };
   }, [
-    data,
+    data.error,
+    data.ensureTransactionDocuments,
+    data.loading,
     maybeActiveLocationId,
     maybeCurrentStage,
     maybeTransactionId,
@@ -352,7 +352,7 @@ export default function TransactionDetail() {
     setIsTaskSubmitting(true);
 
     try {
-      await data.createTask({
+      const message = await data.createTask({
         assignedTo: taskForm.assignedTo.trim(),
         description: taskForm.description.trim(),
         dueDate: taskForm.dueDate,
@@ -363,7 +363,7 @@ export default function TransactionDetail() {
       });
       setTaskForm(initialTaskForm);
       setIsTaskFormOpen(false);
-      setDetailMessage("Task saved.");
+      setDetailMessage(message || "Task saved.");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to save task.";
@@ -904,25 +904,12 @@ export default function TransactionDetail() {
                   documentStatus: documentRecord?.status || null,
                   transactionId,
                 });
-                const workflowDocument = isWorkflowDocument(
-                  documentRecord?.deliveryType,
-                );
                 const inputId = `file-${documentRecord.id}`;
-                const statusOptions = workflowDocument
-                  ? [
-                      ["needed", "Needed"],
-                      ["sent", "Sent"],
-                      ["viewed", "Viewed"],
-                      ["completed", "Completed"],
-                      ["missing", "Missing"],
-                    ]
-                  : [
-                      ["needed", "Needed"],
-                      ["uploaded", "Uploaded"],
-                      ["pending_review", "Pending Review"],
-                      ["approved", "Approved"],
-                      ["rejected", "Rejected"],
-                    ];
+                const statusOptions = [
+                  ["needed", "Required"],
+                  ["uploaded", "Uploaded"],
+                  ["missing", "Missing"],
+                ];
 
                 return (
                   <div className="placeholder-row" key={documentType}>
@@ -930,19 +917,15 @@ export default function TransactionDetail() {
                     <div>
                       <span>{documentRecord.documentName || documentType}</span>
                       <small>
-                        {workflowDocument
-                          ? documentRecord.workflowName || "Workflow document"
-                          : documentRecord.fileName ||
-                            documentRecord.doorScaleFileId ||
-                            "No file uploaded"}
+                        {documentRecord.fileName ||
+                          documentRecord.doorScaleFileId ||
+                          "No file uploaded"}
                       </small>
-                      {!workflowDocument ? (
-                        <small>
-                          {documentRecord.uploadedAt
-                            ? `Uploaded ${formatDate(documentRecord.uploadedAt)}`
-                            : "No upload date"}
-                        </small>
-                      ) : null}
+                      <small>
+                        {documentRecord.uploadedAt
+                          ? `Uploaded ${formatDate(documentRecord.uploadedAt)}`
+                          : "No upload date"}
+                      </small>
                     </div>
                     <Badge
                       variant={documentStatusVariant(
@@ -967,53 +950,47 @@ export default function TransactionDetail() {
                         </option>
                       ))}
                     </select>
-                    {!workflowDocument ? (
-                      <div className="document-actions">
-                        {documentRecord.doorScaleFileId ? (
-                          <a
-                            className="button button--ghost"
-                            href={buildDocumentViewLink(
-                              documentRecord.id,
-                              transactionId,
-                            )}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            View File
-                          </a>
-                        ) : null}
-                        <input
-                          aria-label={`Upload ${documentType}`}
-                          id={inputId}
-                          style={{ display: "none" }}
-                          onChange={(event) => {
-                            handleDocumentFileSelected(event, documentRecord);
-                          }}
-                          type="file"
-                        />
-                        <button
-                          className="button button--secondary"
-                          onClick={() => {
-                            console.log("upload clicked", documentRecord.id);
-                            window.document
-                              .getElementById(`file-${documentRecord.id}`)
-                              ?.click();
-                          }}
-                          type="button"
+                    <div className="document-actions">
+                      {documentRecord.doorScaleFileId ? (
+                        <a
+                          className="button button--ghost"
+                          href={buildDocumentViewLink(
+                            documentRecord.id,
+                            transactionId,
+                          )}
+                          rel="noreferrer"
+                          target="_blank"
                         >
-                          <Upload size={15} />
-                          {uploadingDocumentId === documentRecord.id
-                            ? "Uploading..."
-                            : documentRecord.doorScaleFileId
-                              ? "Replace File"
-                              : "Upload Document"}
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="document-actions">
-                        <Badge variant="default">Workflow</Badge>
-                      </div>
-                    )}
+                          View File
+                        </a>
+                      ) : null}
+                      <input
+                        aria-label={`Upload ${documentType}`}
+                        id={inputId}
+                        style={{ display: "none" }}
+                        onChange={(event) => {
+                          handleDocumentFileSelected(event, documentRecord);
+                        }}
+                        type="file"
+                      />
+                      <button
+                        className="button button--secondary"
+                        onClick={() => {
+                          console.log("upload clicked", documentRecord.id);
+                          window.document
+                            .getElementById(`file-${documentRecord.id}`)
+                            ?.click();
+                        }}
+                        type="button"
+                      >
+                        <Upload size={15} />
+                        {uploadingDocumentId === documentRecord.id
+                          ? "Uploading..."
+                          : documentRecord.doorScaleFileId
+                            ? "Replace File"
+                            : "Upload Document"}
+                      </button>
+                    </div>
                   </div>
                 );
               })}

@@ -77,24 +77,16 @@ export default function Documents() {
     let isMounted = true;
 
     async function prepareMissingChecklists() {
-      const missingTransactions = transactions.filter((transaction) => {
-        const transactionDocuments = documents.filter(
-          (document) => String(document.transactionId) === String(transaction.id),
-        );
-
-        return transactionDocuments.length === 0;
-      });
-
-      if (!missingTransactions.length) {
+      if (!transactions.length) {
         return;
       }
 
       setPreparingTransactionIds(
-        missingTransactions.map((transaction) => transaction.id),
+        transactions.map((transaction) => transaction.id),
       );
 
       await Promise.all(
-        missingTransactions.map((transaction) =>
+        transactions.map((transaction) =>
           ensureTransactionDocuments({
             stage: transaction.stage,
             transactionId: transaction.id,
@@ -113,7 +105,7 @@ export default function Documents() {
     return () => {
       isMounted = false;
     };
-  }, [checklistKeys, documents, ensureTransactionDocuments, transactions]);
+  }, [checklistKeys, ensureTransactionDocuments, transactions]);
 
   async function handleStatusChange(
     document: TransactionDocument,

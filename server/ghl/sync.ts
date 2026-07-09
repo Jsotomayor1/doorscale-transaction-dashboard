@@ -621,6 +621,14 @@ function keepExistingWhenEmpty<T>(incoming: T | null | undefined, existing: T | 
   return incoming ?? existing ?? fallback;
 }
 
+function normalizeTemplateKey(value = "") {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
 function getOpportunityPipelineId(opportunity: DoorScaleOpportunity) {
   return opportunity.pipeline_id ?? opportunity.pipelineId;
 }
@@ -907,7 +915,6 @@ type DocumentTemplate = {
 
 type ExistingDocument = {
   document_type: string | null;
-  template_id?: string | null;
 };
 
 async function generateDocumentChecklist(
@@ -934,25 +941,25 @@ async function generateDocumentChecklist(
   }
 
   const templateRows = (templates ?? []) as DocumentTemplate[];
-  const locationSpecificTemplates = templateRows.filter(
-    (template) => template.location_id === locationId,
-  );
-  const documentTemplates =
-    locationSpecificTemplates.length > 0
-      ? locationSpecificTemplates
-      : templateRows.filter((template) =>
-          ["demo-location", "global"].includes(template.location_id ?? ""),
-        );
-  const normalizedType = transaction.transaction_type.trim().toLowerCase();
-  const normalizedStage = transaction.stage.trim().toLowerCase();
-  const matchingDocumentTemplates = documentTemplates.filter((template) => {
-    const templateType = template.transaction_type?.trim().toLowerCase();
-    const templateStage = (template.stage_name || template.stage)
-      ?.trim()
-      .toLowerCase();
+  const normalizedType = normalizeTemplateKey(transaction.transaction_type);
+  const normalizedStage = normalizeTemplateKey(transaction.stage);
+  const matchingTemplates = templateRows.filter((template) => {
+    const templateType = normalizeTemplateKey(template.transaction_type ?? "");
+    const templateStage = normalizeTemplateKey(
+      template.stage_name || template.stage || "",
+    );
 
     return templateType === normalizedType && templateStage === normalizedStage;
   });
+  const locationSpecificTemplates = matchingTemplates.filter(
+    (template) => template.location_id === locationId,
+  );
+  const matchingDocumentTemplates =
+    locationSpecificTemplates.length > 0
+      ? locationSpecificTemplates
+      : matchingTemplates.filter((template) =>
+          ["demo-location", "global"].includes(template.location_id ?? ""),
+        );
 
   if (!matchingDocumentTemplates.length) {
     return;
@@ -960,7 +967,7 @@ async function generateDocumentChecklist(
 
   const { data: existingDocuments, error: existingDocumentsError } = await db
     .from("transaction_documents")
-    .select("document_type, template_id")
+    .select("document_type")
     .eq("location_id", locationId)
     .eq("transaction_id", transaction.id);
 
@@ -974,23 +981,16 @@ async function generateDocumentChecklist(
       .map((document) => document.document_type?.trim().toLowerCase())
       .filter(Boolean),
   );
-  const existingTemplateIds = new Set(
-    ((existingDocuments ?? []) as ExistingDocument[])
-      .map((document) => document.template_id)
-      .filter(Boolean),
-  );
   const rows = matchingDocumentTemplates
     .filter((template) => {
       const documentType = template.document_type?.trim().toLowerCase();
       if (!documentType) return false;
-      if (template.id && existingTemplateIds.has(template.id)) return false;
 
       return !existingTypes.has(documentType);
     })
     .map((template) => ({
       location_id: locationId,
       transaction_id: transaction.id,
-      template_id: template.id,
       document_type: template.document_type,
       document_name: template.document_type,
       delivery_type: template.delivery_type || "manual_upload",

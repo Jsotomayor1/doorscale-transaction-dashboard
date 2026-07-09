@@ -11,6 +11,7 @@ const API_VERSION = "2021-07-28";
 
 type TransactionRow = {
   contact_id: string | null;
+  ghl_contact_id?: string | null;
   ghl_opportunity_id: string | null;
   location_id: string;
 };
@@ -25,6 +26,23 @@ type CreateTaskBody = {
   title?: string;
   taskId?: string;
   transactionId?: string;
+};
+
+type TaskRowPayload = {
+  assigned_to: string | null;
+  contact_id: string | null;
+  description?: string | null;
+  due_date: string | null;
+  due_datetime: string | null;
+  ghl_opportunity_id: string | null;
+  ghl_task_id?: string | null;
+  last_sync_error?: string | null;
+  last_synced_at?: string | null;
+  location_id: string;
+  status: string;
+  sync_status?: string;
+  title: string;
+  transaction_id: string;
 };
 
 type DoorScaleTaskResponse = {
@@ -79,7 +97,7 @@ export default async function handler(
 
   const { data: transaction, error: transactionError } = await supabase
     .from("transactions")
-    .select("location_id, contact_id, ghl_opportunity_id")
+    .select("location_id, contact_id, ghl_contact_id, ghl_opportunity_id")
     .eq("id", body.transactionId)
     .eq("location_id", activeLocationId)
     .maybeSingle();
@@ -90,10 +108,11 @@ export default async function handler(
   }
 
   const transactionRow = transaction as TransactionRow;
+  const contactId = transactionRow.ghl_contact_id ?? transactionRow.contact_id;
   const dueDateTime = getDueDateTime(body);
   const localTask = {
     assigned_to: body.assignedTo || null,
-    contact_id: transactionRow.contact_id,
+    contact_id: contactId,
     description: body.description || null,
     due_date: body.dueDate || (dueDateTime ? dueDateTime.slice(0, 10) : null),
     due_datetime: dueDateTime,
@@ -120,7 +139,7 @@ export default async function handler(
 
     const taskPayload = {
       assignedTo: body.assignedTo || undefined,
-      contactId: transactionRow.contact_id || undefined,
+      contactId: contactId || undefined,
       dueDate: dueDateTime || undefined,
       opportunityId: transactionRow.ghl_opportunity_id || undefined,
       body: body.description || undefined,
@@ -165,20 +184,43 @@ export default async function handler(
       : null,
     last_synced_at: writeBackFailed ? null : new Date().toISOString(),
   };
-  const saveQuery = body.taskId
-    ? supabase
-        .from("tasks")
-        .update(taskRow)
-        .eq("id", body.taskId)
-        .eq("location_id", activeLocationId)
-        .select("id")
-        .single()
-    : supabase.from("tasks").insert(taskRow).select("id").single();
-  const { data: savedTask, error: saveError } = await saveQuery;
+  async function saveTask(payload: TaskRowPayload) {
+    return body.taskId
+      ? supabase
+          .from("tasks")
+          .update(payload)
+          .eq("id", body.taskId)
+          .eq("location_id", activeLocationId)
+          .select("id")
+          .single()
+      : supabase.from("tasks").insert(payload).select("id").single();
+  }
+
+  let { data: savedTask, error: saveError } = await saveTask(taskRow);
+
+  if (saveError && "description" in taskRow) {
+    console.error("Local task create failed with description; retrying without it:", {
+      code: saveError.code,
+      details: saveError.details,
+      message: saveError.message,
+    });
+    const { description: _description, ...fallbackTaskRow } = taskRow;
+    const fallbackResult = await saveTask(fallbackTaskRow);
+    savedTask = fallbackResult.data;
+    saveError = fallbackResult.error;
+  }
 
   if (saveError) {
-    console.error("Local task create failed:", saveError);
-    response.status(500).json({ ok: false, message: "Unable to save task." });
+    console.error("Local task create failed:", {
+      code: saveError.code,
+      details: saveError.details,
+      hint: saveError.hint,
+      message: saveError.message,
+    });
+    response.status(500).json({
+      ok: false,
+      message: `Unable to save task: ${saveError.message}`,
+    });
     return;
   }
 

@@ -360,6 +360,8 @@ type SupabaseTransactionDocument = {
 type SupabaseTaskTemplate = {
   id: string;
   location_id?: string | null;
+  transaction_type?: string | null;
+  stage?: string | null;
   title: string | null;
   days_offset: number | null;
   assigned_role: string | null;
@@ -818,7 +820,7 @@ async function loadLocationDocuments(
   return client
     .from("transaction_documents")
     .select(
-      "id, location_id, transaction_id, template_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
+      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
     )
     .eq("location_id", activeLocationId)
     .order("created_at", { ascending: false });
@@ -832,7 +834,7 @@ async function loadTransactionDocuments(
   return client
     .from("transaction_documents")
     .select(
-      "id, location_id, transaction_id, template_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
+      "id, location_id, transaction_id, document_type, document_name, delivery_type, doorscale_file_id, doorscale_contact_id, file_name, file_path, file_url, ghl_contact_id, ghl_opportunity_id, status, uploaded_at, uploaded_by, created_at, workflow_name, workflow_trigger_tag",
     )
     .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId)
@@ -854,7 +856,7 @@ async function fetchCrmData(
     client
       .from("tasks")
       .select(
-        "id, location_id, transaction_id, title, description, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
+        "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
       )
       .eq("location_id", activeLocationId)
       .order("created_at", { ascending: false }),
@@ -942,10 +944,8 @@ async function generateChecklistTasks(
 ) {
   const { data: templates, error: templateError } = await client
     .from("task_templates")
-    .select("id, location_id, title, days_offset, assigned_role, sort_order")
+    .select("id, location_id, transaction_type, stage, title, days_offset, assigned_role, sort_order")
     .in("location_id", [activeLocationId, "demo-location", "global"])
-    .eq("transaction_type", transactionType)
-    .eq("stage", stage)
     .order("sort_order", { ascending: true });
 
   if (templateError) {
@@ -955,13 +955,20 @@ async function generateChecklistTasks(
   const templateRows = (templates ?? []) as Array<
     SupabaseTaskTemplate & { location_id?: string | null }
   >;
-  const locationSpecificTemplates = templateRows.filter(
+  const normalizedType = normalizeTemplateKey(transactionType);
+  const normalizedStage = normalizeTemplateKey(stage);
+  const matchingTemplates = templateRows.filter(
+    (template) =>
+      normalizeTemplateKey(template.transaction_type ?? "") === normalizedType &&
+      normalizeTemplateKey(template.stage ?? "") === normalizedStage,
+  );
+  const locationSpecificTemplates = matchingTemplates.filter(
     (template) => template.location_id === activeLocationId,
   );
   const taskTemplates =
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
-      : templateRows.filter((template) =>
+      : matchingTemplates.filter((template) =>
           ["demo-location", "global"].includes(template.location_id ?? ""),
         );
 
@@ -1035,35 +1042,36 @@ async function generateDocumentChecklist(
   }
 
   const templateRows = (templates ?? []) as SupabaseDocumentTemplate[];
-  const locationSpecificTemplates = templateRows.filter(
+  const normalizedTransactionType = normalizeTemplateKey(transactionType);
+  const normalizedStage = normalizeTemplateKey(stage);
+  const matchingTemplates = templateRows.filter((template) => {
+    const templateTransactionType = normalizeTemplateKey(
+      template.transaction_type ?? "",
+    );
+    const templateStage = normalizeTemplateKey(
+      template.stage_name || template.stage || "",
+    );
+
+    return (
+      templateTransactionType === normalizedTransactionType &&
+      templateStage === normalizedStage
+    );
+  });
+  const locationSpecificTemplates = matchingTemplates.filter(
     (template) => template.location_id === activeLocationId,
   );
-  const availableTemplates =
+  const documentTemplates =
     locationSpecificTemplates.length > 0
       ? locationSpecificTemplates
-      : templateRows.filter((template) =>
+      : matchingTemplates.filter((template) =>
           ["global", "demo-location"].includes(template.location_id ?? ""),
         );
-  const normalizedTransactionType = transactionType.trim().toLowerCase();
-  const normalizedStage = stage.trim().toLowerCase();
-  const documentTemplates = availableTemplates.filter((template) => {
-    const templateTransactionType = template.transaction_type
-      ?.trim()
-      .toLowerCase();
-    const templateStage = (template.stage_name || template.stage)
-      ?.trim()
-      .toLowerCase();
-    const typeMatches = templateTransactionType === normalizedTransactionType;
-    const stageMatches = templateStage === normalizedStage;
-
-    return typeMatches && stageMatches;
-  });
 
   if (!documentTemplates.length) return false;
 
   const { data: existingDocuments, error: existingDocumentsError } = await client
     .from("transaction_documents")
-    .select("document_type, template_id")
+    .select("document_type")
     .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId);
 
@@ -1076,24 +1084,17 @@ async function generateDocumentChecklist(
       .map((document) => document.document_type?.trim().toLowerCase())
       .filter(Boolean),
   );
-  const existingTemplateIds = new Set(
-    ((existingDocuments ?? []) as SupabaseDocumentType[])
-      .map((document) => document.template_id)
-      .filter(Boolean),
-  );
   const documentRows = documentTemplates
     .filter((template) => {
       const documentType = template.document_type?.trim().toLowerCase();
 
       if (!documentType) return false;
-      if (template.id && existingTemplateIds.has(template.id)) return false;
 
       return !existingTypes.has(documentType);
     })
     .map((template) => ({
       location_id: activeLocationId,
       transaction_id: transactionId,
-      template_id: template.id,
       document_type: template.document_type,
       document_name: template.document_type,
       delivery_type: template.delivery_type || "manual_upload",
@@ -1152,6 +1153,14 @@ function getDueDateTime(dueDate: string, dueTime: string) {
   }
 
   return null;
+}
+
+function normalizeTemplateKey(value = "") {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ");
 }
 
 async function parseTaskWriteResponse(response: Response) {
@@ -1580,10 +1589,10 @@ export function useCrmData() {
       await refreshData();
 
       if (result.ok === false) {
-        throw new Error(
-          result.message || "Task saved locally. DoorScale sync will retry later.",
-        );
+        return result.message || "Task saved locally. DoorScale sync will retry later.";
       }
+
+      return result.message || "Task saved.";
     },
     [activeLocationId, refreshData],
   );
@@ -1692,12 +1701,22 @@ export function useCrmData() {
       const transaction = data.opportunities.find(
         (opportunity) => String(opportunity.id) === String(transactionId),
       );
+      const transactionRow = data.transactions.find(
+        (currentTransaction) => String(currentTransaction.id) === String(transactionId),
+      );
 
       if (!transaction) {
         throw new Error("Transaction not found.");
       }
 
       const fields = transaction.customFields;
+      const clientNameParts = (transactionRow?.clientName || fields.contactName || "")
+        .trim()
+        .split(/\s+/);
+      const clientFirstName =
+        transactionRow?.clientFirstName || clientNameParts[0] || "";
+      const clientLastName =
+        transactionRow?.clientLastName || clientNameParts.slice(1).join(" ") || "";
       const action = transaction.ghlOpportunityId
         ? "updateTransaction"
         : "createTransaction";
@@ -1716,17 +1735,33 @@ export function useCrmData() {
         body: JSON.stringify({
           action,
           active_location_id: locationId,
-          buyerName: fields.buyerName,
-          closingDate: fields.closingDate,
-          commission: String(transaction.value || 0),
-          inspectionDate: fields.inspectionDeadline,
-          propertyAddress: fields.propertyAddress || transaction.name,
-          sellerName: fields.sellerName,
+          assignedTo: transactionRow?.assignedTo || fields.assignedAgent || "",
+          buyerName: transactionRow?.buyerName || fields.buyerName,
+          clientEmail:
+            transactionRow?.clientEmail ||
+            transactionRow?.contactEmail ||
+            fields.contactEmail ||
+            "",
+          clientFirstName,
+          clientLastName,
+          clientPhone:
+            transactionRow?.clientPhone ||
+            transactionRow?.contactPhone ||
+            fields.contactPhone ||
+            "",
+          closingDate: transactionRow?.closeDate || fields.closingDate,
+          commission: String(transactionRow?.commission ?? transaction.value ?? 0),
+          inspectionDate: transactionRow?.inspectionDate || fields.inspectionDeadline,
+          propertyAddress:
+            transactionRow?.propertyAddress ||
+            fields.propertyAddress ||
+            transaction.name,
+          sellerName: transactionRow?.sellerName || fields.sellerName,
           stage: transaction.stage,
           status: transaction.status,
           locationId,
           transactionId,
-          transactionType: fields.transactionType,
+          transactionType: transactionRow?.type || fields.transactionType,
         }),
       });
       const result = await parseTransactionWriteResponse(response);
@@ -1737,7 +1772,7 @@ export function useCrmData() {
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
         : "Transaction synced.";
     },
-    [activeLocationId, data.opportunities, refreshData],
+    [activeLocationId, data.opportunities, data.transactions, refreshData],
   );
 
   const retryTaskSync = useCallback(

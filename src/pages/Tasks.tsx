@@ -80,7 +80,7 @@ export default function Tasks() {
     setIsCreatingTask(true);
 
     try {
-      await createTask({
+      const message = await createTask({
         assignedTo: taskForm.assignedTo.trim(),
         description: taskForm.description.trim(),
         dueDate: taskForm.dueDate,
@@ -90,7 +90,7 @@ export default function Tasks() {
         transactionId: taskForm.transactionId,
       });
       setTaskForm(initialTaskForm);
-      setTaskMessage("Task created.");
+      setTaskMessage(message || "Task created.");
     } catch (createError) {
       setTaskError(
         createError instanceof Error ? createError.message : "Unable to create task.",

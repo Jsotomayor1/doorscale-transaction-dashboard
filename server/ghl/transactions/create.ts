@@ -467,15 +467,22 @@ export default async function handler(
 
   const body = request.body as CreateTransactionBody;
 
-  if (
-    !body.clientFirstName?.trim() ||
-    !body.clientLastName?.trim() ||
-    (!body.clientEmail?.trim() && !body.clientPhone?.trim()) ||
-    !body.propertyAddress ||
-    !body.transactionType ||
-    !body.stage
-  ) {
-    response.status(400).json({ ok: false, message: "Transaction details are missing." });
+  const missingFields = [
+    !body.clientFirstName?.trim() ? "Client First Name" : "",
+    !body.clientLastName?.trim() ? "Client Last Name" : "",
+    !body.clientEmail?.trim() && !body.clientPhone?.trim()
+      ? "Client Email or Client Phone"
+      : "",
+    !body.propertyAddress?.trim() ? "Property Address" : "",
+    !body.transactionType?.trim() ? "Transaction Type" : "",
+    !body.stage?.trim() ? "Stage" : "",
+  ].filter(Boolean);
+
+  if (missingFields.length) {
+    response.status(400).json({
+      ok: false,
+      message: `Transaction details are missing: ${missingFields.join(", ")}.`,
+    });
     return;
   }
 
