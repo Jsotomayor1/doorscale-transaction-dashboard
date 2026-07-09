@@ -195,6 +195,29 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "DoorScale sync failed.";
 }
 
+function normalizePrivateIntegrationToken(token: string) {
+  return token.trim().replace(/^Bearer\s+/i, "").trim();
+}
+
+function getAuthorizationHeader(token: string) {
+  return `Bearer ${normalizePrivateIntegrationToken(token)}`;
+}
+
+function getTokenDebugShape(token: string) {
+  const trimmedToken = token.trim();
+  const normalizedToken = normalizePrivateIntegrationToken(token);
+
+  return {
+    normalizedLength: normalizedToken.length,
+    normalizedStartsWithBearer: /^Bearer\s+/i.test(normalizedToken),
+    normalizedStartsWithPit: normalizedToken.startsWith("pit-"),
+    rawLength: token.length,
+    rawStartsWithBearer: /^Bearer\s+/i.test(trimmedToken),
+    rawStartsWithPit: trimmedToken.startsWith("pit-"),
+    trimmedChangedLength: token.length !== trimmedToken.length,
+  };
+}
+
 function getContacts(payload: ContactSearchResponse) {
   if (Array.isArray(payload.contacts)) return payload.contacts;
   if (Array.isArray(payload.data)) return payload.data;
@@ -307,7 +330,7 @@ async function getPipelineConfig(accessToken: string, locationId: string) {
   const pipelinesResponse = await fetch(pipelinesUrl, {
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: getAuthorizationHeader(accessToken),
       Version: API_VERSION,
     },
   });
@@ -355,7 +378,7 @@ async function searchContact(
     method: "POST",
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: getAuthorizationHeader(accessToken),
       "Content-Type": "application/json",
       Version: API_VERSION,
     },
@@ -418,7 +441,7 @@ async function updateContact(
     method: "PUT",
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: getAuthorizationHeader(accessToken),
       "Content-Type": "application/json",
       Version: API_VERSION,
     },
@@ -458,7 +481,7 @@ async function createContact(
     method: "POST",
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: getAuthorizationHeader(accessToken),
       "Content-Type": "application/json",
       Version: API_VERSION,
     },
@@ -609,6 +632,7 @@ export default async function handler(
       foundConnection: true,
       hasPrivateIntegrationToken: Boolean(connectedAccount.access_token),
       location_id: connectedAccount.location_id,
+      tokenShape: getTokenDebugShape(connectedAccount.access_token),
       transactionId: body.transactionId ?? null,
     });
 
@@ -660,7 +684,7 @@ export default async function handler(
       method: "POST",
       headers: {
         Accept: "application/json",
-        Authorization: `Bearer ${connectedAccount.access_token}`,
+        Authorization: getAuthorizationHeader(connectedAccount.access_token),
         "Content-Type": "application/json",
         Version: API_VERSION,
       },
