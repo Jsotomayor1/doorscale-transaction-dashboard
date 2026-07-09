@@ -79,14 +79,17 @@ export type EnsureTransactionDocumentsInput = {
 
 export type CreateTaskInput = {
   assignedTo: string;
+  description: string;
   dueDate: string;
   dueTime: string;
+  status: string;
   title: string;
   transactionId: string;
 };
 
 export type UpdateTransactionDetailsInput = {
   transactionId: string;
+  assignedTo: string;
   clientEmail: string;
   clientFirstName: string;
   clientLastName: string;
@@ -183,6 +186,7 @@ export type Opportunity = {
 export type DashboardTask = {
   id: string;
   title: string;
+  description: string;
   dueDate: string;
   dueDateTime: string;
   assignedTo: string;
@@ -318,6 +322,7 @@ type SupabaseTask = {
   location_id: string;
   transaction_id: number | string | null;
   title: string | null;
+  description?: string | null;
   due_date: string | null;
   due_datetime: string | null;
   status: string | null;
@@ -660,6 +665,7 @@ function mapSupabaseData(
       documentCounts:
         documentCountsByTransaction[String(transaction.id)] ?? emptyDocumentCounts(),
       tasks: relatedTasks.map((task) => ({
+        description: task.description ?? "",
         id: task.id,
         title: task.title ?? "Untitled task",
         status: task.status ?? "pending",
@@ -694,6 +700,7 @@ function mapSupabaseData(
       return {
         id: task.id,
         title: task.title ?? "Untitled task",
+        description: task.description ?? "",
         dueDate: task.due_date ?? "",
         dueDateTime: task.due_datetime ?? task.due_date ?? "",
         assignedTo: task.assigned_to ?? "",
@@ -747,6 +754,7 @@ function mapDemoData(): CrmDataState {
   const tasks = demoTransactions.flatMap((transaction) =>
     transaction.tasks.map((task) => ({
       ...task,
+      description: "",
       dueDate: task.dueDate,
       dueDateTime: task.dueDate,
       assignedTo: task.owner,
@@ -846,7 +854,7 @@ async function fetchCrmData(
     client
       .from("tasks")
       .select(
-        "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
+        "id, location_id, transaction_id, title, description, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
       )
       .eq("location_id", activeLocationId)
       .order("created_at", { ascending: false }),
@@ -1525,11 +1533,12 @@ export function useCrmData() {
           id: `task-${Date.now()}`,
           assignedTo: input.assignedTo,
           clientName: "",
+          description: input.description,
           dueDate: input.dueDate,
           dueDateTime: dueDateTime ?? "",
           propertyAddress: "",
           relatedOpportunityId: input.transactionId,
-          status: "pending",
+          status: input.status || "pending",
           title: input.title,
           transactionId: input.transactionId,
         };
@@ -1557,9 +1566,10 @@ export function useCrmData() {
           action: "createTask",
           active_location_id: locationId,
           assignedTo: input.assignedTo,
+          description: input.description,
           dueDate: input.dueDate || null,
           dueDateTime,
-          status: "pending",
+          status: input.status || "pending",
           title: input.title,
           transactionId: input.transactionId,
           locationId,

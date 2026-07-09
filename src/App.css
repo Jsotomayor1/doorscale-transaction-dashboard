@@ -303,7 +303,9 @@
   font-weight: 750;
 }
 
-.task-create-form input {
+.task-create-form input,
+.task-create-form select,
+.task-create-form textarea {
   min-height: 42px;
   width: 100%;
   border: 1px solid #cbd5e1;
@@ -313,9 +315,26 @@
   background: #ffffff;
 }
 
-.task-create-form input:focus {
+.task-create-form textarea {
+  min-height: 88px;
+  padding-top: 10px;
+  resize: vertical;
+}
+
+.task-create-form input:focus,
+.task-create-form select:focus,
+.task-create-form textarea:focus {
   border-color: #1f6f5b;
   outline: 3px solid rgba(31, 111, 91, 0.15);
+}
+
+.task-create-form--page {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.task-create-form__wide,
+.task-create-form__actions {
+  grid-column: 1 / -1;
 }
 
 .private-integration-form {

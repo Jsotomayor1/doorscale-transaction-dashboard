@@ -258,8 +258,10 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
 
     await data.createTask({
       assignedTo: taskForm.assignedTo,
+      description: "",
       dueDate: taskForm.dueDate,
       dueTime: taskForm.dueTime,
+      status: "pending",
       title: taskForm.title,
       transactionId: String(selectedTransaction.id),
     });

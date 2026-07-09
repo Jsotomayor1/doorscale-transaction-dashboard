@@ -154,6 +154,7 @@ export function TaskItem({
       <div>
         <h3>{task.title}</h3>
         <p>{showContext ? task.propertyAddress || "No related transaction" : task.assignedTo || "Unassigned"}</p>
+        {task.description ? <p>{task.description}</p> : null}
       </div>
       <div className="task-row__badges">
         {overdue ? <Badge variant="danger">Overdue</Badge> : null}

@@ -43,6 +43,7 @@ type TransactionRow = {
 };
 
 type UpdateTransactionBody = {
+  assignedTo?: string;
   buyerName?: string;
   clientEmail?: string;
   clientFirstName?: string;
@@ -206,6 +207,7 @@ function buildLocalUpdate(body: UpdateTransactionBody) {
     .trim();
 
   return {
+    ...(body.assignedTo !== undefined ? { assigned_to: body.assignedTo || null } : {}),
     ...(body.buyerName !== undefined ? { buyer_name: body.buyerName || null } : {}),
     ...(body.clientEmail !== undefined ? { client_email: body.clientEmail || null, contact_email: body.clientEmail || null } : {}),
     ...(body.clientFirstName !== undefined ? { client_first_name: body.clientFirstName || null } : {}),
@@ -249,6 +251,7 @@ function buildOpportunityUpdate(
     ...(body.propertyAddress !== undefined ? { name: getOpportunityName(body) } : {}),
     ...(pipelineId ? { pipelineId } : {}),
     ...(pipelineStageId ? { pipelineStageId } : {}),
+    ...(body.assignedTo !== undefined ? { assignedTo: body.assignedTo || undefined } : {}),
     ...(body.status !== undefined ? { status: mapStatus(body.status) } : {}),
   };
 }

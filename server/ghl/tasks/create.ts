@@ -17,6 +17,7 @@ type TransactionRow = {
 
 type CreateTaskBody = {
   assignedTo?: string;
+  description?: string;
   dueDate?: string;
   dueDateTime?: string;
   locationId?: string;
@@ -93,6 +94,7 @@ export default async function handler(
   const localTask = {
     assigned_to: body.assignedTo || null,
     contact_id: transactionRow.contact_id,
+    description: body.description || null,
     due_date: body.dueDate || (dueDateTime ? dueDateTime.slice(0, 10) : null),
     due_datetime: dueDateTime,
     ghl_opportunity_id: transactionRow.ghl_opportunity_id,
@@ -121,6 +123,7 @@ export default async function handler(
       contactId: transactionRow.contact_id || undefined,
       dueDate: dueDateTime || undefined,
       opportunityId: transactionRow.ghl_opportunity_id || undefined,
+      body: body.description || undefined,
       title: body.title,
     };
 

@@ -31,6 +31,7 @@ export function EditTransactionModal({
   const fields = transaction.customFields;
   const [form, setForm] = useState<UpdateTransactionDetailsInput>(() => ({
     transactionId: String(transaction.id),
+    assignedTo: fields.assignedAgent || transaction.assignedTo || "",
     clientEmail: fields.contactEmail || "",
     clientFirstName: transaction.customFields.contactName?.split(/\s+/)[0] || "",
     clientLastName: transaction.customFields.contactName?.split(/\s+/).slice(1).join(" ") || "",
@@ -80,6 +81,7 @@ export function EditTransactionModal({
     try {
       await onSave({
         ...form,
+        assignedTo: form.assignedTo.trim(),
         clientEmail: form.clientEmail.trim(),
         clientFirstName: form.clientFirstName.trim(),
         clientLastName: form.clientLastName.trim(),
@@ -207,6 +209,14 @@ export function EditTransactionModal({
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="form-field">
+            <span>Assigned Agent</span>
+            <input
+              onChange={(event) => updateField("assignedTo", event.target.value)}
+              value={form.assignedTo}
+            />
           </label>
 
           <label className="form-field">

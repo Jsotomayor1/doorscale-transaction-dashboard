@@ -37,8 +37,10 @@ import { formatCurrency } from "@/lib/utils";
 
 const initialTaskForm = {
   assignedTo: "",
+  description: "",
   dueDate: "",
   dueTime: "",
+  status: "pending",
   title: "",
 };
 
@@ -352,8 +354,10 @@ export default function TransactionDetail() {
     try {
       await data.createTask({
         assignedTo: taskForm.assignedTo.trim(),
+        description: taskForm.description.trim(),
         dueDate: taskForm.dueDate,
         dueTime: taskForm.dueTime,
+        status: taskForm.status,
         title: taskForm.title.trim(),
         transactionId,
       });
@@ -527,7 +531,7 @@ export default function TransactionDetail() {
         ) : (
           <Button disabled variant="secondary">
             <ExternalLink size={17} />
-            Open Contact
+            Contact not synced
           </Button>
         )}
         {opportunityLink ? (
@@ -543,7 +547,7 @@ export default function TransactionDetail() {
         ) : (
           <Button disabled variant="secondary">
             <ExternalLink size={17} />
-            Open Opportunity
+            Opportunity not synced
           </Button>
         )}
         {transactionNeedsSync ? (
@@ -620,6 +624,34 @@ export default function TransactionDetail() {
                     }))
                   }
                   value={taskForm.assignedTo}
+                />
+              </label>
+              <label>
+                <span>Status</span>
+                <select
+                  onChange={(event) =>
+                    setTaskForm((current) => ({
+                      ...current,
+                      status: event.target.value,
+                    }))
+                  }
+                  value={taskForm.status}
+                >
+                  <option value="pending">Pending</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+              <label className="task-create-form__wide">
+                <span>Description</span>
+                <textarea
+                  onChange={(event) =>
+                    setTaskForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  value={taskForm.description}
                 />
               </label>
               <div className="modal__actions">
