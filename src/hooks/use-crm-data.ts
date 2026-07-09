@@ -1219,6 +1219,30 @@ async function parseTransactionWriteResponse(response: Response) {
   return result;
 }
 
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("DoorScale sync timed out. Please try again.");
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 export function useCrmData() {
   const [data, setData] = useState<CrmDataState>(() =>
     isDemoMode() ? mapDemoData() : emptyData,
@@ -1763,16 +1787,21 @@ export function useCrmData() {
         transactionRow?.clientFirstName || clientNameParts[0] || "";
       const clientLastName =
         transactionRow?.clientLastName || clientNameParts.slice(1).join(" ") || "";
-      const action = transaction.ghlOpportunityId
-        ? "updateTransaction"
-        : "createTransaction";
+      const action = "updateTransaction";
       const locationId = activeLocationId || (await getActiveLocationId());
 
       if (!locationId) {
         throw new Error("Connect DoorScale to save transaction data.");
       }
 
-      const response = await fetch("/api/ghl", {
+      console.log("DoorScale Retry Sync request:", {
+        action,
+        endpoint: "/api/ghl",
+        locationId,
+        transactionId,
+      });
+
+      const response = await fetchWithTimeout("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1809,7 +1838,7 @@ export function useCrmData() {
           transactionId,
           transactionType: transactionRow?.type || fields.transactionType,
         }),
-      });
+      }, 30000);
       const result = await parseTransactionWriteResponse(response);
 
       await refreshData();

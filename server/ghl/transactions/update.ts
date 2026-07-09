@@ -35,11 +35,28 @@ type PipelinesResponse = {
 };
 
 type TransactionRow = {
+  assigned_to: string | null;
+  buyer_name: string | null;
+  client_email: string | null;
+  client_first_name: string | null;
+  client_last_name: string | null;
+  client_phone: string | null;
+  closing_date: string | null;
   contact_id: string | null;
+  contact_email: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  commission: number | null;
   ghl_contact_id: string | null;
+  ghl_location_id: string | null;
   ghl_opportunity_id: string | null;
+  inspection_date: string | null;
   location_id: string;
+  property_address: string | null;
+  seller_name: string | null;
   stage: string | null;
+  status: string | null;
+  transaction_type: string | null;
 };
 
 type UpdateTransactionBody = {
@@ -217,6 +234,12 @@ async function getPipelineConfig(accessToken: string, locationId: string) {
   }
 
   const stages = pipeline.stages ?? pipeline.pipelineStages ?? [];
+  console.log("DoorScale transaction pipeline found:", {
+    pipelineId: getPipelineId(pipeline) ?? null,
+    pipelineName: getPipelineName(pipeline) ?? null,
+    stageCount: stages.length,
+  });
+
   const stageMap = new Map(
     stages
       .map((stage) => {
@@ -279,6 +302,69 @@ function getSafeBodyPreview(rawBody: string) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "DoorScale sync failed.";
+}
+
+function coalesceText(...values: Array<string | number | null | undefined>) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+
+    const text = String(value).trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function mergeBodyWithTransactionRow(
+  body: UpdateTransactionBody,
+  transaction: TransactionRow,
+): UpdateTransactionBody {
+  const fallbackName =
+    transaction.contact_name ||
+    [transaction.client_first_name, transaction.client_last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  const nameParts = fallbackName.trim().split(/\s+/).filter(Boolean);
+
+  return {
+    ...body,
+    assignedTo: coalesceText(body.assignedTo, transaction.assigned_to),
+    buyerName: coalesceText(body.buyerName, transaction.buyer_name),
+    clientEmail: coalesceText(
+      body.clientEmail,
+      transaction.client_email,
+      transaction.contact_email,
+    ),
+    clientFirstName: coalesceText(
+      body.clientFirstName,
+      transaction.client_first_name,
+      nameParts[0],
+    ),
+    clientLastName: coalesceText(
+      body.clientLastName,
+      transaction.client_last_name,
+      nameParts.slice(1).join(" "),
+    ),
+    clientPhone: coalesceText(
+      body.clientPhone,
+      transaction.client_phone,
+      transaction.contact_phone,
+    ),
+    closingDate: coalesceText(body.closingDate, transaction.closing_date),
+    commission: coalesceText(body.commission, transaction.commission),
+    inspectionDate: coalesceText(body.inspectionDate, transaction.inspection_date),
+    locationId: coalesceText(
+      body.locationId,
+      transaction.ghl_location_id,
+      transaction.location_id,
+    ),
+    propertyAddress: coalesceText(body.propertyAddress, transaction.property_address),
+    sellerName: coalesceText(body.sellerName, transaction.seller_name),
+    stage: coalesceText(body.stage, transaction.stage),
+    status: coalesceText(body.status, transaction.status, "active"),
+    transactionType: coalesceText(body.transactionType, transaction.transaction_type),
+  };
 }
 
 function normalizePrivateIntegrationToken(token: string) {
@@ -542,7 +628,7 @@ export default async function handler(
     return;
   }
 
-  const body = request.body as UpdateTransactionBody;
+  let body = request.body as UpdateTransactionBody;
 
   const activeLocationId = getRequestedLocationId(request);
 
@@ -556,7 +642,9 @@ export default async function handler(
   });
   const { data: transaction, error: transactionError } = await supabase
     .from("transactions")
-    .select("contact_id, ghl_contact_id, ghl_opportunity_id, location_id, stage")
+    .select(
+      "assigned_to, buyer_name, client_email, client_first_name, client_last_name, client_phone, closing_date, contact_id, contact_email, contact_name, contact_phone, commission, ghl_contact_id, ghl_location_id, ghl_opportunity_id, inspection_date, location_id, property_address, seller_name, stage, status, transaction_type",
+    )
     .eq("id", body.transactionId)
     .eq("location_id", activeLocationId)
     .maybeSingle();
@@ -567,6 +655,7 @@ export default async function handler(
   }
 
   const transactionRow = transaction as TransactionRow;
+  body = mergeBodyWithTransactionRow(body, transactionRow);
   let writeBackFailed = false;
   let syncErrorMessage = "";
   let contactId = transactionRow.ghl_contact_id ?? transactionRow.contact_id ?? undefined;
@@ -581,6 +670,7 @@ export default async function handler(
     existingGhlOpportunityId: transactionRow.ghl_opportunity_id,
     ghl_location_id: body.locationId ?? null,
     location_id: activeLocationId,
+    propertyAddress: body.propertyAddress ?? null,
     stage: body.stage ?? transactionRow.stage,
     transactionId: body.transactionId,
     transactionType: body.transactionType ?? null,
@@ -607,6 +697,19 @@ export default async function handler(
 
     const selectedStage = body.stage || transactionRow.stage || "";
     stageName = selectedStage || undefined;
+
+    const missingSyncFields = [
+      !body.propertyAddress ? "Property Address" : "",
+      !body.transactionType ? "Transaction Type" : "",
+      !selectedStage ? "Stage" : "",
+      !body.clientFirstName && !body.buyerName && !body.sellerName
+        ? "Client, Buyer, or Seller Name"
+        : "",
+    ].filter(Boolean);
+
+    if (missingSyncFields.length) {
+      throw new Error(`Transaction details are missing: ${missingSyncFields.join(", ")}.`);
+    }
 
     if (selectedStage) {
       const pipelineConfig = await getPipelineConfig(

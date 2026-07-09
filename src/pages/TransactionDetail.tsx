@@ -464,9 +464,12 @@ export default function TransactionDetail() {
     );
   }
 
-  const transactionNeedsSync = ["pending_sync", "sync_error"].includes(
-    (transaction.syncStatus || "synced").toLowerCase(),
-  );
+  const transactionNeedsSync =
+    ["pending_sync", "sync_error"].includes(
+      (transaction.syncStatus || "synced").toLowerCase(),
+    ) ||
+    !transaction.ghlContactId ||
+    !transaction.ghlOpportunityId;
 
   return (
     <div className="dashboard transaction-workspace">
