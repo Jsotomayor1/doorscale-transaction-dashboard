@@ -66,8 +66,6 @@ export async function syncTaskToDoorScale(input: {
     assignedTo: input.assignedTo || undefined,
     contactId: input.contactId,
     dueDate: input.dueDateTime || undefined,
-    locationId: input.activeLocationId,
-    opportunityId: input.transactionRow.ghl_opportunity_id || undefined,
     body: input.description || undefined,
     title: input.title,
   };
@@ -77,6 +75,9 @@ export async function syncTaskToDoorScale(input: {
     contactIdExists: Boolean(input.contactId),
     endpoint,
     locationId: input.activeLocationId,
+    requestKeys: Object.keys(taskPayload).filter(
+      (key) => taskPayload[key as keyof typeof taskPayload] !== undefined,
+    ),
     taskId: input.taskId || null,
     taskTitle: input.title,
     transactionId: input.transactionId,
@@ -96,6 +97,7 @@ export async function syncTaskToDoorScale(input: {
     const rawBody = await taskResponse.text();
 
     console.log("DoorScale task sync response:", {
+      body: rawBody,
       endpoint,
       status: taskResponse.status,
       taskId: input.taskId || null,

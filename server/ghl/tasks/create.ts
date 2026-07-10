@@ -32,7 +32,6 @@ type CreateTaskBody = {
 type TaskRowPayload = {
   assigned_to: string | null;
   contact_id: string | null;
-  description?: string | null;
   due_date: string | null;
   due_datetime: string | null;
   ghl_opportunity_id: string | null;
@@ -110,7 +109,6 @@ export default async function handler(
   const localTask = {
     assigned_to: body.assignedTo || null,
     contact_id: contactId,
-    description: body.description || null,
     due_date: body.dueDate || (dueDateTime ? dueDateTime.slice(0, 10) : null),
     due_datetime: dueDateTime,
     ghl_opportunity_id: transactionRow.ghl_opportunity_id,
@@ -179,18 +177,6 @@ export default async function handler(
   }
 
   let { data: savedTask, error: saveError } = await saveTask(taskRow);
-
-  if (saveError && "description" in taskRow) {
-    console.error("Local task create failed with description; retrying without it:", {
-      code: saveError.code,
-      details: saveError.details,
-      message: saveError.message,
-    });
-    const { description: _description, ...fallbackTaskRow } = taskRow;
-    const fallbackResult = await saveTask(fallbackTaskRow);
-    savedTask = fallbackResult.data;
-    saveError = fallbackResult.error;
-  }
 
   if (saveError) {
     console.error("Local task create failed with sync metadata; retrying with base task fields:", {

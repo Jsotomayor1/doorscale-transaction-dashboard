@@ -13,7 +13,6 @@ type TransactionRow = {
 
 type TaskRow = {
   assigned_to?: string | null;
-  description?: string | null;
   due_date?: string | null;
   due_datetime?: string | null;
   ghl_task_id?: string | null;
@@ -78,7 +77,7 @@ export async function PostTransactionSync(input: {
 
   const { data: taskRows, error: taskError } = await supabase
     .from("tasks")
-    .select("id, transaction_id, title, description, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, ghl_task_id")
+    .select("id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, ghl_task_id")
     .eq("location_id", activeLocationId)
     .eq("transaction_id", transactionId);
 
@@ -108,7 +107,6 @@ export async function PostTransactionSync(input: {
       activeLocationId,
       assignedTo: task.assigned_to,
       contactId,
-      description: task.description,
       dueDateTime: task.due_datetime || task.due_date || null,
       taskId: task.id,
       title: task.title || "Untitled task",
