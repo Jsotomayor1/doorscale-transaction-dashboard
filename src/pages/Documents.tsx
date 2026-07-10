@@ -336,7 +336,7 @@ export default function Documents() {
         </CardContent>
       </Card>
 
-      <section className="entity-grid" aria-label="Transaction documents">
+      <section className="entity-grid documents-entity-grid" aria-label="Transaction documents">
         {transactions.map((transaction) => {
           const transactionDocuments = documents.filter(
             (document) => String(document.transactionId) === String(transaction.id),

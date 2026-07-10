@@ -163,7 +163,7 @@ export default function Index() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="urgent-tasks-card">
           <CardHeader>
             <div>
               <CardTitle>Urgent Tasks</CardTitle>
@@ -171,7 +171,7 @@ export default function Index() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="task-list">
+            <div className="task-list urgent-tasks-list">
               {urgentTasks.map((task) => (
                 <article className="task-row" key={task.id}>
                   <div>

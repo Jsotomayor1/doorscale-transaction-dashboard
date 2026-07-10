@@ -915,7 +915,7 @@ export default function TransactionDetail() {
           </CardHeader>
           <CardContent>
             {relatedTasks.length ? (
-              <div className="task-list">
+              <div className="task-list workspace-scroll-list workspace-scroll-list--tasks">
                 {relatedTasks.map((task) => (
                   <TaskItem
                     key={task.id}
@@ -934,7 +934,7 @@ export default function TransactionDetail() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="workspace-scroll-card workspace-scroll-card--documents">
           <CardHeader>
             <div>
               <CardTitle>Documents</CardTitle>
@@ -942,7 +942,7 @@ export default function TransactionDetail() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="placeholder-list">
+            <div className="placeholder-list workspace-scroll-list workspace-scroll-list--documents">
               {!documentTrackingRows.length ? (
                 <div className="empty-state">
                   <p>
