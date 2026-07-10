@@ -5,6 +5,7 @@ import {
   getRequestedLocationId,
   logRouteDataCounts,
 } from "../_active-location.js";
+import { retryPendingDocumentMirrors } from "../../documents/mirror.js";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
 const CONTACTS_URL = "https://services.leadconnectorhq.com/contacts/";
@@ -841,6 +842,24 @@ export default async function handler(
     mode: localTransactionId ? "updated" : "inserted",
     transactionId: savedTransaction?.id,
   });
+
+  if (!writeBackFailed && savedTransaction?.id) {
+    try {
+      await retryPendingDocumentMirrors({
+        accessToken: connectedAccount.access_token,
+        activeLocationId,
+        contactId: contactId ?? savedTransaction.ghl_contact_id ?? savedTransaction.contact_id ?? null,
+        propertyAddress: savedTransaction.property_address ?? body.propertyAddress,
+        supabase,
+        transactionId: String(savedTransaction.id),
+      });
+    } catch (documentMirrorError) {
+      console.error("DoorScale document mirror retry after transaction create failed:", {
+        error: documentMirrorError,
+        transactionId: savedTransaction.id,
+      });
+    }
+  }
 
   response.status(200).json({
     duplicateOpportunityHandled,

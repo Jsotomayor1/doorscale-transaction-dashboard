@@ -5,6 +5,7 @@ import {
   getRequestedLocationId,
   logRouteDataCounts,
 } from "../_active-location.js";
+import { retryPendingDocumentMirrors } from "../../documents/mirror.js";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
 const CONTACTS_URL = "https://services.leadconnectorhq.com/contacts/";
@@ -896,6 +897,24 @@ export default async function handler(
     console.error("Local transaction update failed:", updateError);
     response.status(500).json({ ok: false, message: "Unable to save transaction." });
     return;
+  }
+
+  if (!writeBackFailed) {
+    try {
+      await retryPendingDocumentMirrors({
+        accessToken: connectedAccount.access_token,
+        activeLocationId,
+        contactId: contactId ?? updatedTransaction?.ghl_contact_id ?? updatedTransaction?.contact_id ?? null,
+        propertyAddress: updatedTransaction?.property_address ?? transactionRow.property_address,
+        supabase,
+        transactionId: body.transactionId,
+      });
+    } catch (documentMirrorError) {
+      console.error("DoorScale document mirror retry after transaction sync failed:", {
+        error: documentMirrorError,
+        transactionId: body.transactionId,
+      });
+    }
   }
 
   response.status(200).json({
