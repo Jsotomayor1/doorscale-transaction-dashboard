@@ -35,6 +35,18 @@ import {
 } from "@/lib/active-location";
 import { formatCurrency } from "@/lib/utils";
 
+const WORKSPACE_STAGES = [
+  "Pre-listing",
+  "Active",
+  "Under Contract",
+  "Inspections",
+  "Appraisal",
+  "Clear to Close",
+  "Closed",
+] as const;
+
+type WorkspaceTab = "tasks" | "documents" | "notes";
+
 const initialTaskForm = {
   assignedTo: "",
   description: "",
@@ -190,6 +202,7 @@ export default function TransactionDetail() {
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isLoadingNotes, setIsLoadingNotes] = useState(false);
   const [notesLoadedFor, setNotesLoadedFor] = useState("");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("tasks");
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -600,654 +613,71 @@ export default function TransactionDetail() {
     !transaction.ghlOpportunityId ||
     Boolean(transaction.lastSyncError);
 
+  const currentStageIndex = Math.max(
+    WORKSPACE_STAGES.findIndex((stage) => stage === currentStage),
+    0,
+  );
+  const primaryContactName =
+    fields.contactName ||
+    [fields.buyerName, fields.sellerName].filter(Boolean).join(" / ") ||
+    "Primary contact not set";
+  const primaryContactRole =
+    fields.transactionType === "Buyer"
+      ? "Buyer"
+      : fields.transactionType === "Rental"
+        ? "Rental client"
+        : fields.transactionType === "Buyer/Seller"
+          ? "Buyer / Seller"
+          : "Seller";
+  const propertyAddress = fields.propertyAddress || transaction.name || "Property not set";
+
   return (
-    <div className="dashboard transaction-workspace">
-      <header className="workspace-header">
-        <div>
-          <Link className="back-link" to="/transactions">
-            <ArrowLeft size={16} />
-            Back to Transactions
-          </Link>
+    <div className="dashboard transaction-workspace transaction-workspace--redesigned">
+      <header className="workspace-hero">
+        <div className="workspace-hero__main">
+          <Link className="back-link" to="/transactions"><ArrowLeft size={16} />Back to Transactions</Link>
           <p className="dashboard__eyebrow">Transaction workspace</p>
-          <h2>{fields.propertyAddress || transaction.name}</h2>
-          <div className="workspace-header__meta">
-            <span>{fields.transactionType || "Transaction type not set"}</span>
-            <span>{fields.assignedAgent || "Agent not assigned"}</span>
-            <span>{transaction.status || "Status not set"}</span>
-          </div>
+          <h2>{propertyAddress}</h2>
+          <div className="workspace-hero__badges"><Badge variant="default">{fields.transactionType || "Transaction type not set"}</Badge><Badge variant={stageVariant(transaction.stage)}>{transaction.stage as TransactionStage}</Badge><Badge variant={getSyncVariant(transaction.syncStatus)}>{getSyncLabel(transaction.syncStatus)}</Badge></div>
         </div>
-        <Badge variant={stageVariant(transaction.stage)}>
-          {transaction.stage as TransactionStage}
-        </Badge>
-        <Badge variant={getSyncVariant(transaction.syncStatus)}>
-          {getSyncLabel(transaction.syncStatus)}
-        </Badge>
+        <div className="workspace-hero__actions" aria-label="Transaction actions">
+          {contactLink ? <a className="button button--secondary" href={contactLink} rel="noreferrer" target="_blank"><ExternalLink size={17} />Open Contact</a> : <Button disabled variant="secondary"><ExternalLink size={17} />Contact not synced</Button>}
+          {opportunityLink ? <a className="button button--secondary" href={opportunityLink} rel="noreferrer" target="_blank"><ExternalLink size={17} />Open Opportunity</a> : <Button disabled variant="secondary"><ExternalLink size={17} />Opportunity not synced</Button>}
+          <Button onClick={() => { setDetailMessage(""); setDetailError(""); setIsEditOpen(true); }}><Pencil size={17} />Edit</Button>
+          <Button onClick={() => { setTaskError(""); setIsTaskFormOpen((current) => !current); setActiveWorkspaceTab("tasks"); }}><CheckSquare size={17} />Add Task</Button>
+          {transactionNeedsSync ? <Button disabled={isRetryingSync} onClick={() => void handleRetryTransactionSync()} variant="secondary">{isRetryingSync ? "Syncing..." : "Retry Sync"}</Button> : null}
+        </div>
       </header>
 
-      <section className="workspace-actions" aria-label="Transaction actions">
-        <Button
-          onClick={() => {
-            setDetailMessage("");
-            setDetailError("");
-            setIsEditOpen(true);
-          }}
-        >
-          <Pencil size={17} />
-          Edit Transaction
-        </Button>
-        <Button
-          onClick={() => {
-            setTaskError("");
-            setIsTaskFormOpen((current) => !current);
-          }}
-        >
-          <CheckSquare size={17} />
-          Add Task
-        </Button>
-        {contactLink ? (
-          <a
-            className="button button--secondary"
-            href={contactLink}
-            rel="noreferrer"
-            target="_blank"
-          >
-            <ExternalLink size={17} />
-            Open Contact
-          </a>
-        ) : (
-          <Button disabled variant="secondary">
-            <ExternalLink size={17} />
-            Contact not synced
-          </Button>
-        )}
-        {opportunityLink ? (
-          <a
-            className="button button--secondary"
-            href={opportunityLink}
-            rel="noreferrer"
-            target="_blank"
-          >
-            <ExternalLink size={17} />
-            Open Opportunity
-          </a>
-        ) : (
-          <Button disabled variant="secondary">
-            <ExternalLink size={17} />
-            Opportunity not synced
-          </Button>
-        )}
-        {transactionNeedsSync ? (
-          <Button
-            disabled={isRetryingSync}
-            onClick={() => void handleRetryTransactionSync()}
-            variant="secondary"
-          >
-            Retry Sync
-          </Button>
-        ) : null}
+      <section className="stage-timeline" aria-label="Transaction stage timeline">
+        {WORKSPACE_STAGES.map((stage, index) => {
+          const stageState = index < currentStageIndex ? "completed" : index === currentStageIndex ? "current" : "upcoming";
+          return <button className={`stage-timeline__item stage-timeline__item--${stageState}`} disabled={isUpdatingStage || stage === currentStage} key={stage} onClick={() => void handleStageChange(stage)} type="button"><span>{index + 1}</span><strong>{stage}</strong></button>;
+        })}
       </section>
 
-      {detailMessage ? (
-        <p className="dashboard__success">{detailMessage}</p>
-      ) : null}
+      {stageMessage ? <p className="dashboard__success">{stageMessage}</p> : null}
+      {stageError ? <p className="dashboard__error">{stageError}</p> : null}
+      {detailMessage ? <p className="dashboard__success">{detailMessage}</p> : null}
       {detailError ? <p className="dashboard__error">{detailError}</p> : null}
 
-      {isTaskFormOpen ? (
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Add Task</CardTitle>
-              <CardDescription>Create a task for this transaction.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form className="task-create-form" onSubmit={handleCreateTask}>
-              <label>
-                <span>Task title</span>
-                <input
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                  value={taskForm.title}
-                />
-              </label>
-              <label>
-                <span>Due date</span>
-                <input
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      dueDate: event.target.value,
-                    }))
-                  }
-                  type="date"
-                  value={taskForm.dueDate}
-                />
-              </label>
-              <label>
-                <span>Due time</span>
-                <input
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      dueTime: event.target.value,
-                    }))
-                  }
-                  type="time"
-                  value={taskForm.dueTime}
-                />
-              </label>
-              <label>
-                <span>Assigned to</span>
-                <input
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      assignedTo: event.target.value,
-                    }))
-                  }
-                  value={taskForm.assignedTo}
-                />
-              </label>
-              <label>
-                <span>Status</span>
-                <select
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      status: event.target.value,
-                    }))
-                  }
-                  value={taskForm.status}
-                >
-                  <option value="pending">Pending</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </label>
-              <label className="task-create-form__wide">
-                <span>Description</span>
-                <textarea
-                  onChange={(event) =>
-                    setTaskForm((current) => ({
-                      ...current,
-                      description: event.target.value,
-                    }))
-                  }
-                  rows={3}
-                  value={taskForm.description}
-                />
-              </label>
-              <div className="modal__actions">
-                <Button disabled={isTaskSubmitting} type="submit">
-                  Save Task
-                </Button>
-                <Button
-                  disabled={isTaskSubmitting}
-                  onClick={() => setIsTaskFormOpen(false)}
-                  type="button"
-                  variant="ghost"
-                >
-                  Cancel
-                </Button>
-              </div>
-              {taskError ? <p className="form-error">{taskError}</p> : null}
-            </form>
-          </CardContent>
-        </Card>
-      ) : null}
+      {isTaskFormOpen ? <Card><CardHeader><div><CardTitle>Add Task</CardTitle><CardDescription>Create a task for this transaction.</CardDescription></div></CardHeader><CardContent><form className="task-create-form" onSubmit={handleCreateTask}><label className="task-create-form__wide"><span>Title</span><input onChange={(event) => setTaskForm((current) => ({ ...current, title: event.target.value }))} required value={taskForm.title} /></label><label><span>Due date</span><input onChange={(event) => setTaskForm((current) => ({ ...current, dueDate: event.target.value }))} type="date" value={taskForm.dueDate} /></label><label><span>Due time</span><input onChange={(event) => setTaskForm((current) => ({ ...current, dueTime: event.target.value }))} type="time" value={taskForm.dueTime} /></label><label><span>Assigned to</span><input onChange={(event) => setTaskForm((current) => ({ ...current, assignedTo: event.target.value }))} value={taskForm.assignedTo} /></label><label><span>Status</span><select onChange={(event) => setTaskForm((current) => ({ ...current, status: event.target.value }))} value={taskForm.status}><option value="pending">Pending</option><option value="completed">Completed</option></select></label><label className="task-create-form__wide"><span>Description</span><textarea onChange={(event) => setTaskForm((current) => ({ ...current, description: event.target.value }))} rows={3} value={taskForm.description} /></label><div className="modal__actions"><Button disabled={isTaskSubmitting} type="submit">Save Task</Button><Button disabled={isTaskSubmitting} onClick={() => setIsTaskFormOpen(false)} type="button" variant="ghost">Cancel</Button></div>{taskError ? <p className="form-error">{taskError}</p> : null}</form></CardContent></Card> : null}
 
-      <EditTransactionModal
-        isOpen={isEditOpen}
-        onClose={() => setIsEditOpen(false)}
-        onSave={async (input) => {
-          setDetailMessage("");
-          setDetailError("");
-          try {
-            const message = await data.updateTransactionDetails(input);
-            setDetailMessage(message || "Transaction details updated.");
-          } catch (error) {
-            setDetailError(
-              error instanceof Error
-                ? error.message
-                : "Unable to update transaction.",
-            );
-            throw error;
-          }
-        }}
-        transaction={transaction}
-      />
+      <EditTransactionModal isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} onSave={async (input) => { setDetailMessage(""); setDetailError(""); try { const message = await data.updateTransactionDetails(input); setDetailMessage(message || "Transaction details updated."); } catch (error) { setDetailError(error instanceof Error ? error.message : "Unable to update transaction."); throw error; } }} transaction={transaction} />
 
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Update Stage</CardTitle>
-            <CardDescription>
-              Moving stages generates any missing checklist tasks for this
-              transaction type.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <label className="stage-update-control">
-            <span>Current Stage</span>
-            <select
-              disabled={isUpdatingStage}
-              onChange={(event) =>
-                void handleStageChange(event.target.value as TransactionStage)
-              }
-              value={currentStage}
-            >
-              {TRANSACTION_STAGES.map((stage) => (
-                <option key={stage} value={stage}>
-                  {stage}
-                </option>
-              ))}
-            </select>
-          </label>
-          {stageMessage ? (
-            <p className="dashboard__success">{stageMessage}</p>
-          ) : null}
-          {stageError ? <p className="dashboard__error">{stageError}</p> : null}
-        </CardContent>
-      </Card>
-
-      <section className="summary-grid" aria-label="Transaction summary">
-        <Card>
-          <CardHeader>
-            <CardDescription>Transaction Type</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{fields.transactionType || "Not set"}</strong>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Assigned Agent</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{fields.assignedAgent || "Not assigned"}</strong>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Buyer Name</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{fields.buyerName || "Not set"}</strong>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Seller Name</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{fields.sellerName || "Not set"}</strong>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Closing Date</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{formatDate(fields.closingDate)}</strong>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Inspection Date</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{formatDate(fields.inspectionDeadline)}</strong>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Commission</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{formatCurrency(transaction.value)}</strong>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Current Stage</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <strong>{transaction.stage || "Not set"}</strong>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="workspace-grid">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Contact Info</CardTitle>
-              <CardDescription>Primary contact for this transaction.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <dl className="detail-list">
-              <div>
-                <dt>Name</dt>
-                <dd>{fields.contactName || "Not set"}</dd>
-              </div>
-              <div>
-                <dt>Email</dt>
-                <dd>{fields.contactEmail || "Not set"}</dd>
-              </div>
-              <div>
-                <dt>Phone</dt>
-                <dd>{fields.contactPhone || "Not set"}</dd>
-              </div>
-              <div>
-                <dt>Property Address</dt>
-                <dd>{fields.propertyAddress || transaction.name || "Not set"}</dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Important Dates</CardTitle>
-              <CardDescription>Inspection and closing timeline.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <dl className="detail-list">
-              <div>
-                <dt>Inspection Date</dt>
-                <dd>{formatDate(fields.inspectionDeadline)}</dd>
-              </div>
-              <div>
-                <dt>Closing Date</dt>
-                <dd>
-                  <CalendarClock size={15} />
-                  {formatDate(fields.closingDate)}
-                </dd>
-              </div>
-              <div>
-                <dt>Days Until Closing</dt>
-                <dd>{getDaysUntilClosing(fields.closingDate)}</dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Tasks / Checklist</CardTitle>
-              <CardDescription>Tasks connected to this transaction.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {relatedTasks.length ? (
-              <div className="task-list workspace-scroll-list workspace-scroll-list--tasks">
-                {relatedTasks.map((task) => (
-                  <TaskItem
-                    key={task.id}
-                    onComplete={data.markTaskCompleted}
-                    onRetrySync={data.retryTaskSync}
-                    onUpdateDueDateTime={data.updateTaskDueDateTime}
-                    task={task}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="empty-state">
-                No tasks connected to this transaction yet.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="workspace-scroll-card workspace-scroll-card--documents">
-          <CardHeader>
-            <div>
-              <CardTitle>Documents</CardTitle>
-              <CardDescription>Document checklist for this transaction.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="placeholder-list workspace-scroll-list workspace-scroll-list--documents">
-              {!documentTrackingRows.length ? (
-                <div className="empty-state">
-                  <p>
-                    {isPreparingDocuments
-                      ? "Preparing document checklist..."
-                      : "No document checklist templates found for this transaction yet."}
-                  </p>
-                  {!isPreparingDocuments ? (
-                    <div className="manual-document-upload">
-                      <input
-                        aria-label="Document name"
-                        onChange={(event) => setManualDocumentName(event.target.value)}
-                        placeholder="Document name or type"
-                        value={manualDocumentName}
-                      />
-                      <label className="button button--secondary document-upload-label">
-                        <Upload size={15} />
-                        {uploadingDocumentId === "manual"
-                          ? "Uploading..."
-                          : "Upload Document"}
-                        <input
-                          disabled={uploadingDocumentId === "manual"}
-                          onChange={(event) =>
-                            void handleManualDocumentFileSelected(event)
-                          }
-                          type="file"
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {documentTrackingRows.map(({ document: documentRecord, documentType }) => {
-                const inputId = `file-${documentRecord.id}`;
-                const statusOptions = [
-                  ["needed", "Required"],
-                  ["uploaded", "Uploaded"],
-                  ["missing", "Missing"],
-                ];
-
-                return (
-                  <div className="placeholder-row" key={documentType}>
-                    <FileText size={16} />
-                    <div>
-                      {renamingDocumentIds.includes(documentRecord.id) ? (
-                        <input
-                          aria-label="Rename document"
-                          onChange={(event) =>
-                            setRenameValues((currentValues) => ({
-                              ...currentValues,
-                              [documentRecord.id]: event.target.value,
-                            }))
-                          }
-                          value={
-                            renameValues[documentRecord.id] ??
-                            (documentRecord.documentName || documentType)
-                          }
-                        />
-                      ) : (
-                        <span>{documentRecord.documentName || documentType}</span>
-                      )}
-                      <small>
-                        {documentRecord.fileName ||
-                          documentRecord.doorScaleFileId ||
-                          "No file uploaded"}
-                      </small>
-                      <small>
-                        {documentRecord.uploadedAt
-                          ? `Uploaded ${formatDate(documentRecord.uploadedAt)}`
-                          : "No upload date"}
-                      </small>
-                    </div>
-                    <Badge
-                      variant={documentStatusVariant(
-                        documentRecord.status || "Needed",
-                      )}
-                    >
-                      {formatDocumentStatus(documentRecord.status)}
-                    </Badge>
-                    <select
-                      aria-label={`Update ${documentType} status`}
-                      onChange={(event) => {
-                        void handleDocumentStatusChange(
-                          documentRecord,
-                          event.target.value,
-                        );
-                      }}
-                      value={normalizeDocumentStatus(documentRecord.status)}
-                    >
-                      {statusOptions.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="document-actions">
-                      {documentRecord.doorScaleFileId ? (
-                        <a
-                          className="button button--ghost"
-                          href={buildDocumentViewLink(
-                            documentRecord.id,
-                            transactionId,
-                          )}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          View File
-                        </a>
-                      ) : null}
-                      <input
-                        aria-label={`Upload ${documentType}`}
-                        id={inputId}
-                        style={{ display: "none" }}
-                        onChange={(event) => {
-                          handleDocumentFileSelected(event, documentRecord);
-                        }}
-                        type="file"
-                      />
-                      <button
-                        className="button button--secondary"
-                        onClick={() => {
-                          window.document
-                            .getElementById(`file-${documentRecord.id}`)
-                            ?.click();
-                        }}
-                        type="button"
-                      >
-                        <Upload size={15} />
-                        {uploadingDocumentId === documentRecord.id
-                          ? "Uploading..."
-                          : documentRecord.doorScaleFileId
-                            ? "Replace File"
-                            : "Upload Document"}
-                      </button>
-                      {renamingDocumentIds.includes(documentRecord.id) ? (
-                        <>
-                          <button
-                            className="button button--ghost"
-                            onClick={() => void handleRenameDocument(documentRecord)}
-                            type="button"
-                          >
-                            Save Name
-                          </button>
-                          <button
-                            className="button button--ghost"
-                            onClick={() =>
-                              setRenamingDocumentIds((currentIds) =>
-                                currentIds.filter((id) => id !== documentRecord.id),
-                              )
-                            }
-                            type="button"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="button button--ghost"
-                          onClick={() => {
-                            setRenameValues((currentValues) => ({
-                              ...currentValues,
-                              [documentRecord.id]:
-                                documentRecord.documentName || documentType,
-                            }));
-                            setRenamingDocumentIds((currentIds) => [
-                              ...currentIds,
-                              documentRecord.id,
-                            ]);
-                          }}
-                          type="button"
-                        >
-                          Rename
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Notes</CardTitle>
-              <CardDescription>Transaction and CRM contact notes.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form className="notes-form" onSubmit={handleAddNote}>
-              <textarea
-                onChange={(event) => setNoteText(event.target.value)}
-                placeholder="Add a transaction note..."
-                value={noteText}
-              />
-              <Button disabled={isSavingNote || !noteText.trim()} type="submit">
-                <StickyNote size={16} />
-                {isSavingNote ? "Saving..." : "Add Note"}
-              </Button>
-            </form>
-            <div className="notes-list">
-              {transactionNotes.map((note) => (
-                <article className="note-row" key={note.id}>
-                  <div>
-                    <Badge variant={note.source === "CRM" ? "default" : "muted"}>
-                      {note.source}
-                    </Badge>
-                    <span>{formatDate(note.createdAt)}</span>
-                  </div>
-                  <p>{note.body}</p>
-                  {note.syncStatus !== "synced" ? (
-                    <small>{note.lastSyncError || statusLabel(note.syncStatus)}</small>
-                  ) : null}
-                </article>
-              ))}
-              {isLoadingNotes ? <p className="empty-state">Loading notes...</p> : null}
-              {!isLoadingNotes && !transactionNotes.length ? (
-                <div className="notes-placeholder">
-                  <StickyNote size={20} />
-                  No notes yet.
-                </div>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
+      <section className="transaction-workspace-layout">
+        <div className="transaction-workspace-layout__left">
+          <Card><CardHeader><div><CardTitle>Key Dates</CardTitle><CardDescription>Inspection and closing timeline.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Inspection Date</dt><dd>{formatDate(fields.inspectionDeadline)}</dd></div><div><dt>Closing Date</dt><dd><CalendarClock size={15} />{formatDate(fields.closingDate)}</dd></div><div><dt>Days Until Closing</dt><dd>{getDaysUntilClosing(fields.closingDate)}</dd></div></dl></CardContent></Card>
+          <Card><CardHeader><div><CardTitle>Transaction Team</CardTitle><CardDescription>Primary CRM contact for this transaction.</CardDescription></div></CardHeader><CardContent><div className="team-contact-card"><div><strong>{primaryContactName}</strong><span>{primaryContactRole}</span>{fields.contactEmail ? <small>{fields.contactEmail}</small> : null}{fields.contactPhone ? <small>{fields.contactPhone}</small> : null}</div>{contactLink ? <a className="button button--secondary" href={contactLink} rel="noreferrer" target="_blank">Open Contact</a> : null}</div><Button disabled variant="ghost">Add Contact - Coming next</Button></CardContent></Card>
+          <Card><CardHeader><div><CardTitle>Financial Summary</CardTitle><CardDescription>Projected transaction value.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Commission</dt><dd>{formatCurrency(transaction.value)}</dd></div><div><dt>Status</dt><dd>{transaction.status || "Not set"}</dd></div><div><dt>Assigned Agent</dt><dd>{fields.assignedAgent || "Not assigned"}</dd></div></dl></CardContent></Card>
+          {propertyAddress !== "Property not set" ? <Card><CardHeader><div><CardTitle>Property Details</CardTitle><CardDescription>Transaction property information.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Address</dt><dd>{propertyAddress}</dd></div><div><dt>Transaction Type</dt><dd>{fields.transactionType || "Not set"}</dd></div></dl></CardContent></Card> : null}
+        </div>
+        <div className="transaction-workspace-layout__right"><Card className="workspace-panel-card"><CardHeader><div><CardTitle>Workspace</CardTitle><CardDescription>Tasks, documents, and notes for this transaction.</CardDescription></div></CardHeader><CardContent><div className="workspace-tabs" role="tablist" aria-label="Workspace sections"><button className={activeWorkspaceTab === "tasks" ? "is-active" : ""} onClick={() => setActiveWorkspaceTab("tasks")} type="button">Tasks / Checklist</button><button className={activeWorkspaceTab === "documents" ? "is-active" : ""} onClick={() => setActiveWorkspaceTab("documents")} type="button">Documents</button><button className={activeWorkspaceTab === "notes" ? "is-active" : ""} onClick={() => setActiveWorkspaceTab("notes")} type="button">Notes / Activity</button></div>
+          {activeWorkspaceTab === "tasks" ? <section className="workspace-tab-panel">{relatedTasks.length ? <div className="task-list workspace-scroll-list workspace-scroll-list--tasks">{relatedTasks.map((task) => <TaskItem key={task.id} onComplete={data.markTaskCompleted} onRetrySync={data.retryTaskSync} onUpdateDueDateTime={data.updateTaskDueDateTime} task={task} />)}</div> : <div className="empty-state">No tasks connected to this transaction yet.</div>}</section> : null}
+          {activeWorkspaceTab === "documents" ? <section className="workspace-tab-panel"><div className="placeholder-list workspace-scroll-list workspace-scroll-list--documents">{!documentTrackingRows.length ? <div className="empty-state"><p>{isPreparingDocuments ? "Preparing document checklist..." : "No document checklist templates found for this transaction yet."}</p>{!isPreparingDocuments ? <div className="manual-document-upload"><input aria-label="Document name" onChange={(event) => setManualDocumentName(event.target.value)} placeholder="Document name or type" value={manualDocumentName} /><label className="button button--secondary document-upload-label"><Upload size={15} />{uploadingDocumentId === "manual" ? "Uploading..." : "Upload Document"}<input disabled={uploadingDocumentId === "manual"} onChange={(event) => void handleManualDocumentFileSelected(event)} type="file" /></label></div> : null}</div> : null}{documentTrackingRows.map(({ document: documentRecord, documentType }) => { const inputId = `file-${documentRecord.id}`; const statusOptions = [["needed", "Required"], ["uploaded", "Uploaded"], ["missing", "Missing"]]; return <div className="placeholder-row" key={documentType}><FileText size={16} /><div>{renamingDocumentIds.includes(documentRecord.id) ? <input aria-label="Rename document" onChange={(event) => setRenameValues((currentValues) => ({ ...currentValues, [documentRecord.id]: event.target.value }))} value={renameValues[documentRecord.id] ?? (documentRecord.documentName || documentType)} /> : <span>{documentRecord.documentName || documentType}</span>}<small>{documentRecord.fileName || documentRecord.doorScaleFileId || "No file uploaded"}</small><small>{documentRecord.uploadedAt ? `Uploaded ${formatDate(documentRecord.uploadedAt)}` : "No upload date"}</small></div><Badge variant={documentStatusVariant(documentRecord.status || "Needed")}>{formatDocumentStatus(documentRecord.status)}</Badge><select aria-label={`Update ${documentType} status`} onChange={(event) => { void handleDocumentStatusChange(documentRecord, event.target.value); }} value={normalizeDocumentStatus(documentRecord.status)}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><div className="document-actions">{documentRecord.doorScaleFileId ? <a className="button button--ghost" href={buildDocumentViewLink(documentRecord.id, transactionId)} rel="noreferrer" target="_blank">View File</a> : null}<input aria-label={`Upload ${documentType}`} id={inputId} style={{ display: "none" }} onChange={(event) => { handleDocumentFileSelected(event, documentRecord); }} type="file" /><button className="button button--secondary" onClick={() => { window.document.getElementById(`file-${documentRecord.id}`)?.click(); }} type="button"><Upload size={15} />{uploadingDocumentId === documentRecord.id ? "Uploading..." : documentRecord.doorScaleFileId ? "Replace File" : "Upload Document"}</button>{renamingDocumentIds.includes(documentRecord.id) ? <><button className="button button--ghost" onClick={() => void handleRenameDocument(documentRecord)} type="button">Save Name</button><button className="button button--ghost" onClick={() => setRenamingDocumentIds((currentIds) => currentIds.filter((itemId) => itemId !== documentRecord.id))} type="button">Cancel</button></> : <button className="button button--ghost" onClick={() => { setRenameValues((currentValues) => ({ ...currentValues, [documentRecord.id]: documentRecord.documentName || documentType })); setRenamingDocumentIds((currentIds) => [...currentIds, documentRecord.id]); }} type="button">Rename</button>}</div></div>; })}</div></section> : null}
+          {activeWorkspaceTab === "notes" ? <section className="workspace-tab-panel"><form className="notes-form" onSubmit={handleAddNote}><textarea onChange={(event) => setNoteText(event.target.value)} placeholder="Add a transaction note..." value={noteText} /><Button disabled={isSavingNote || !noteText.trim()} type="submit"><StickyNote size={16} />{isSavingNote ? "Saving..." : "Add Note"}</Button></form><div className="notes-list">{transactionNotes.map((note) => <article className="note-row" key={note.id}><div><Badge variant={note.source === "CRM" ? "default" : "muted"}>{note.source}</Badge><span>{formatDate(note.createdAt)}</span></div><p>{note.body}</p>{note.syncStatus !== "synced" ? <small>{note.lastSyncError || statusLabel(note.syncStatus)}</small> : null}</article>)}{isLoadingNotes ? <p className="empty-state">Loading notes...</p> : null}{!isLoadingNotes && !transactionNotes.length ? <div className="notes-placeholder"><StickyNote size={20} />No notes yet.</div> : null}</div></section> : null}
+        </CardContent></Card></div>
       </section>
     </div>
   );
 }
-
-
-
-
-

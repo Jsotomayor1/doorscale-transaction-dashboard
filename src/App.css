@@ -2180,3 +2180,218 @@
   color: #b45309;
   font-weight: 750;
 }
+
+.workspace-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: start;
+  padding: 22px;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+}
+
+.workspace-hero h2 {
+  margin: 4px 0 10px;
+  color: var(--ds-text, #0f172a);
+  font-size: clamp(1.8rem, 3vw, 2.65rem);
+  line-height: 1.05;
+}
+
+.workspace-hero__badges,
+.workspace-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.workspace-hero__actions {
+  justify-content: flex-end;
+  max-width: 460px;
+}
+
+.stage-timeline {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.stage-timeline__item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  min-height: 82px;
+  align-content: center;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--ds-muted, #64748b);
+  background: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stage-timeline__item:disabled {
+  cursor: default;
+}
+
+.stage-timeline__item span {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.stage-timeline__item strong {
+  min-width: 0;
+  color: inherit;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
+.stage-timeline__item--completed {
+  border-color: rgba(20, 184, 166, 0.36);
+  color: var(--ds-teal, #14b8a6);
+  background: #ecfdf5;
+}
+
+.stage-timeline__item--completed span {
+  background: var(--ds-teal, #14b8a6);
+}
+
+.stage-timeline__item--current {
+  border-color: rgba(37, 99, 235, 0.45);
+  color: var(--ds-blue, #2563eb);
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.18);
+}
+
+.stage-timeline__item--current span {
+  background: var(--ds-blue, #2563eb);
+}
+
+.transaction-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.35fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.transaction-workspace-layout__left,
+.transaction-workspace-layout__right {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.team-contact-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 13px;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.team-contact-card > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.team-contact-card strong {
+  color: var(--ds-text, #0f172a);
+  font-size: 1rem;
+}
+
+.team-contact-card span,
+.team-contact-card small {
+  color: var(--ds-muted, #64748b);
+  overflow-wrap: anywhere;
+}
+
+.workspace-panel-card .card__content {
+  display: grid;
+  gap: 14px;
+}
+
+.workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.workspace-tabs button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ds-muted, #64748b);
+  background: transparent;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.workspace-tabs button.is-active {
+  color: #ffffff;
+  background: var(--ds-blue, #2563eb);
+}
+
+.workspace-tab-panel {
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .workspace-hero,
+  .transaction-workspace-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-hero__actions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .stage-timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-hero {
+    padding: 16px;
+  }
+
+  .workspace-hero__actions,
+  .team-contact-card {
+    display: grid;
+  }
+
+  .workspace-hero__actions .button,
+  .workspace-hero__actions a,
+  .team-contact-card .button {
+    width: 100%;
+  }
+
+  .stage-timeline,
+  .workspace-tabs {
+    grid-template-columns: 1fr;
+  }
+}
