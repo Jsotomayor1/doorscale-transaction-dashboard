@@ -326,7 +326,7 @@ export default function TransactionDetail() {
         transactionType,
         stage,
       });
-      setStageMessage(message || "Stage updated and checklist tasks generated.");
+      setStageMessage(message || "Stage updated.");
     } catch (error) {
       setStageError(
         error instanceof Error ? error.message : "Unable to update stage.",

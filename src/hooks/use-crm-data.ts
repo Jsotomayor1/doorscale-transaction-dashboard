@@ -1702,26 +1702,73 @@ export function useCrmData() {
       });
       const result = await parseTransactionWriteResponse(response);
 
-      await generateChecklistTasks(
-        client,
-        locationId,
-        input.transactionId,
-        input.transactionType,
-        input.stage,
-      );
-      await generateDocumentChecklist(
-        client,
-        locationId,
-        input.transactionId,
-        input.transactionType,
-        input.stage,
-      );
+      if (result.transaction) {
+        setData((currentData) =>
+          mergeSyncedTransaction(currentData, result.transaction ?? {}),
+        );
+      }
+
+      setData((currentData) => ({
+        ...currentData,
+        transactions: currentData.transactions.map((transaction) =>
+          String(transaction.id) === String(input.transactionId)
+            ? {
+                ...transaction,
+                stage: input.stage,
+                updatedAt: new Date().toISOString(),
+              }
+            : transaction,
+        ),
+        opportunities: currentData.opportunities.map((opportunity) =>
+          String(opportunity.id) === String(input.transactionId)
+            ? {
+                ...opportunity,
+                stage: input.stage,
+                updatedAt: new Date().toISOString(),
+              }
+            : opportunity,
+        ),
+      }));
+
+      try {
+        await generateChecklistTasks(
+          client,
+          locationId,
+          input.transactionId,
+          input.transactionType,
+          input.stage,
+        );
+      } catch (taskChecklistError) {
+        console.error("DoorScale stage task checklist refresh failed:", {
+          error: taskChecklistError,
+          stage: input.stage,
+          transactionId: input.transactionId,
+          transactionType: input.transactionType,
+        });
+      }
+
+      try {
+        await generateDocumentChecklist(
+          client,
+          locationId,
+          input.transactionId,
+          input.transactionType,
+          input.stage,
+        );
+      } catch (documentChecklistError) {
+        console.error("DoorScale stage document checklist refresh failed:", {
+          error: documentChecklistError,
+          stage: input.stage,
+          transactionId: input.transactionId,
+          transactionType: input.transactionType,
+        });
+      }
 
       await refreshData();
-
+      notifyDoorScaleDataChanged();
       return result.ok === false
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
-        : undefined;
+        : "Stage updated.";
     },
     [activeLocationId, refreshData],
   );
