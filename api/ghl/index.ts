@@ -1,6 +1,7 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+﻿import type { VercelRequest, VercelResponse } from "@vercel/node";
 import locationsHandler from "../../server/ghl/locations.js";
 import privateConnectHandler from "../../server/ghl/private-connect.js";
+import notesHandler from "../../server/ghl/notes.js";
 import selectLocationHandler from "../../server/ghl/select-location.js";
 import statusHandler from "../../server/ghl/status.js";
 import syncHandler from "../../server/ghl/sync.js";
@@ -35,6 +36,9 @@ export default async function handler(
       return createTransactionHandler(request, response);
     case "locations":
       return locationsHandler(request, response);
+    case "createNote":
+    case "fetchNotes":
+      return notesHandler(request, response);
     case "privateConnect":
       return privateConnectHandler(request, response);
     case "selectLocation":
@@ -54,3 +58,5 @@ export default async function handler(
       });
   }
 }
+
+

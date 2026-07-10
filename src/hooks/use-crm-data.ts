@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, subDays } from "date-fns";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -243,6 +243,24 @@ export type DocumentStatus =
   | "missing";
 
 export type DocumentStatusCounts = Record<DocumentStatus, number>;
+export type TransactionNote = {
+  id: string;
+  transactionId: string;
+  contactId: string;
+  body: string;
+  createdAt: string;
+  source: "DoorScale" | "CRM";
+  syncStatus: "synced" | "pending_sync" | "failed" | string;
+  lastSyncError?: string;
+};
+
+type NotesResponse = {
+  message?: string;
+  note?: Partial<TransactionNote>;
+  notes?: Array<Partial<TransactionNote>>;
+  ok?: boolean;
+  pending?: boolean;
+};
 
 type TaskWriteResponse = {
   message?: string;
@@ -1507,6 +1525,45 @@ function normalizeTemplateKey(value = "") {
     .replace(/\s+/g, " ");
 }
 
+
+function normalizeTransactionNote(
+  note: Partial<TransactionNote>,
+  transactionId: string,
+): TransactionNote {
+  return {
+    id: note.id || `local-note-${transactionId}-${Date.now()}`,
+    transactionId: String(note.transactionId || transactionId),
+    contactId: note.contactId || "",
+    body: note.body || "",
+    createdAt: note.createdAt || new Date().toISOString(),
+    source: note.source === "CRM" ? "CRM" : "DoorScale",
+    syncStatus: note.syncStatus || "synced",
+    lastSyncError: note.lastSyncError || "",
+  };
+}
+
+function mergeTransactionNotes(
+  currentNotes: TransactionNote[],
+  incomingNotes: TransactionNote[],
+) {
+  const noteMap = new Map<string, TransactionNote>();
+
+  [...currentNotes, ...incomingNotes].forEach((note) => {
+    const fingerprint = `${note.id || ""}:${note.body}:${note.createdAt}`;
+    const existing = noteMap.get(note.id) || noteMap.get(fingerprint);
+
+    noteMap.set(note.id || fingerprint, {
+      ...existing,
+      ...note,
+    });
+  });
+
+  return Array.from(noteMap.values()).sort(
+    (firstNote, secondNote) =>
+      new Date(secondNote.createdAt).getTime() -
+      new Date(firstNote.createdAt).getTime(),
+  );
+}
 async function parseTaskWriteResponse(response: Response) {
   const result = (await response.json().catch(() => ({}))) as TaskWriteResponse;
 
@@ -1557,6 +1614,7 @@ export function useCrmData() {
   );
   const [loading, setLoading] = useState(!isDemoMode());
   const [error, setError] = useState<string | null>(null);
+  const [notes, setNotes] = useState<TransactionNote[]>([]);
   const [activeLocationId, setActiveLocationId] = useState("");
   const renderCount = useRef(0);
   renderCount.current += 1;
@@ -2931,6 +2989,131 @@ export function useCrmData() {
     },
     [activeLocationId],
   );
+  const fetchTransactionNotes = useCallback(
+    async (transactionId: string) => {
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId || !transactionId) return [];
+
+      const response = await fetchWithTimeout("/api/ghl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
+        },
+        body: JSON.stringify({
+          action: "fetchNotes",
+          active_location_id: locationId,
+          locationId,
+          transactionId,
+        }),
+      }, 30000);
+      const result = (await response.json().catch(() => ({}))) as NotesResponse;
+
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to load notes.");
+      }
+
+      const normalizedNotes = (result.notes || [])
+        .map((note) => normalizeTransactionNote(note, transactionId))
+        .filter((note) => note.body);
+
+      setNotes((currentNotes) =>
+        mergeTransactionNotes(
+          currentNotes.filter(
+            (note) => String(note.transactionId) !== String(transactionId),
+          ),
+          normalizedNotes,
+        ),
+      );
+
+      return normalizedNotes;
+    },
+    [activeLocationId],
+  );
+
+  const createTransactionNote = useCallback(
+    async ({ body, transactionId }: { body: string; transactionId: string }) => {
+      const trimmedBody = body.trim();
+
+      if (!trimmedBody) {
+        throw new Error("Note is required.");
+      }
+
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId || !transactionId) {
+        throw new Error("Open this dashboard from your DoorScale account.");
+      }
+
+      const pendingNote = normalizeTransactionNote(
+        {
+          body: trimmedBody,
+          createdAt: new Date().toISOString(),
+          id: `pending-note-${transactionId}-${Date.now()}`,
+          source: "DoorScale",
+          syncStatus: "pending_sync",
+          transactionId,
+        },
+        transactionId,
+      );
+
+      setNotes((currentNotes) => mergeTransactionNotes(currentNotes, [pendingNote]));
+
+      const response = await fetchWithTimeout("/api/ghl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
+        },
+        body: JSON.stringify({
+          action: "createNote",
+          active_location_id: locationId,
+          body: trimmedBody,
+          locationId,
+          transactionId,
+        }),
+      }, 30000);
+      const result = (await response.json().catch(() => ({}))) as NotesResponse;
+
+      if (!response.ok) {
+        setNotes((currentNotes) =>
+          currentNotes.map((note) =>
+            note.id === pendingNote.id
+              ? {
+                  ...note,
+                  lastSyncError: result.message || "Unable to save note.",
+                  syncStatus: "failed",
+                }
+              : note,
+          ),
+        );
+        throw new Error(result.message || "Unable to save note.");
+      }
+
+      const savedNote = normalizeTransactionNote(
+        result.note || {
+          ...pendingNote,
+          syncStatus: result.ok === false ? "pending_sync" : "synced",
+        },
+        transactionId,
+      );
+
+      setNotes((currentNotes) =>
+        mergeTransactionNotes(
+          currentNotes.filter((note) => note.id !== pendingNote.id),
+          [savedNote],
+        ),
+      );
+
+      if (result.ok === false) {
+        return result.message || "Note saved locally. Waiting for CRM contact sync.";
+      }
+
+      return result.message || "Note saved.";
+    },
+    [activeLocationId],
+  );
 
   useEffect(() => {
     void refreshData();
@@ -2980,6 +3163,7 @@ export function useCrmData() {
 
     return {
       ...data,
+      notes,
       activeTransactions,
       openTasks: data.tasks.filter(
         (task) => task.status.toLowerCase() === "pending",
@@ -3000,6 +3184,8 @@ export function useCrmData() {
       loading,
       error,
       refreshData,
+      fetchTransactionNotes,
+      createTransactionNote,
       createTask,
       createTransaction,
       updateTransactionDetails,
@@ -3014,13 +3200,16 @@ export function useCrmData() {
       ensureTransactionDocuments,
     };
   }, [
+    createTransactionNote,
     createTask,
     createTransaction,
     data,
     error,
     ensureTransactionDocuments,
+    fetchTransactionNotes,
     loading,
     markTaskCompleted,
+    notes,
     refreshData,
     renameTransactionDocument,
     retryTaskSync,
@@ -3034,3 +3223,12 @@ export function useCrmData() {
 }
 
 export const useCRMData = useCrmData;
+
+
+
+
+
+
+
+
+

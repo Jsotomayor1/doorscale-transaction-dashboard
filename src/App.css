@@ -1,4 +1,4 @@
-#root {
+﻿#root {
   min-height: 100vh;
 }
 
@@ -2114,4 +2114,69 @@
   .mobile-scroll-list {
     max-height: 330px;
   }
+}
+
+.notes-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.notes-form textarea,
+.mobile-textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--ds-text, #0f172a);
+  background: #ffffff;
+  font: inherit;
+}
+
+.notes-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-color: rgba(37, 99, 235, 0.38) transparent;
+  scrollbar-width: thin;
+}
+
+.note-row,
+.mobile-note {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.note-row > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ds-muted, #64748b);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.note-row p,
+.mobile-note p {
+  margin: 0;
+  color: var(--ds-text, #0f172a);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.note-row small,
+.mobile-note small {
+  color: #b45309;
+  font-weight: 750;
 }

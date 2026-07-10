@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, format } from "date-fns";
+﻿import { differenceInCalendarDays, format } from "date-fns";
 import {
   ArrowLeft,
   CalendarClock,
@@ -43,6 +43,10 @@ const initialTaskForm = {
   status: "pending",
   title: "",
 };
+
+function statusLabel(status = "") {
+  return status.replace(/_/g, " ");
+}
 
 function formatDate(dateValue: string) {
   const date = new Date(dateValue);
@@ -182,6 +186,10 @@ export default function TransactionDetail() {
   const [renamingDocumentIds, setRenamingDocumentIds] = useState<string[]>([]);
   const [renameValues, setRenameValues] = useState<Record<string, string>>({});
   const [isPreparingDocuments, setIsPreparingDocuments] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isLoadingNotes, setIsLoadingNotes] = useState(false);
+  const [notesLoadedFor, setNotesLoadedFor] = useState("");
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -193,6 +201,9 @@ export default function TransactionDetail() {
     "";
   const maybeTransactionType = transaction?.customFields.transactionType || "";
   const maybeCurrentStage = transaction?.stage || "";
+  const transactionNotes = data.notes.filter(
+    (note) => String(note.transactionId) === String(maybeTransactionId),
+  );
   const transactionDocumentsForCurrentTransaction = data.documents.filter(
     (document) =>
       String(document.transactionId) === String(maybeTransactionId) &&
@@ -246,6 +257,68 @@ export default function TransactionDetail() {
     transactionDocumentsForCurrentTransaction.length,
   ]);
 
+
+  useEffect(() => {
+    if (
+      data.loading ||
+      data.error ||
+      !transaction ||
+      !maybeTransactionId ||
+      notesLoadedFor === maybeTransactionId
+    ) {
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingNotes(true);
+
+    data.fetchTransactionNotes(maybeTransactionId)
+      .catch((error) => {
+        if (isMounted) {
+          console.warn("DoorScale notes are still loading:", error);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setNotesLoadedFor(maybeTransactionId);
+          setIsLoadingNotes(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    data.error,
+    data.fetchTransactionNotes,
+    data.loading,
+    maybeTransactionId,
+    notesLoadedFor,
+    transaction,
+  ]);
+
+  async function handleAddNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!noteText.trim() || !maybeTransactionId) return;
+
+    setDetailMessage("");
+    setDetailError("");
+    setIsSavingNote(true);
+
+    try {
+      const message = await data.createTransactionNote({
+        body: noteText,
+        transactionId: maybeTransactionId,
+      });
+      setNoteText("");
+      setDetailMessage(message || "Note saved.");
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "Unable to save note.");
+    } finally {
+      setIsSavingNote(false);
+    }
+  }
   if (data.loading) {
     return (
       <div className="dashboard">
@@ -1129,13 +1202,43 @@ export default function TransactionDetail() {
           <CardHeader>
             <div>
               <CardTitle>Notes</CardTitle>
-              <CardDescription>Transaction notes will appear here.</CardDescription>
+              <CardDescription>Transaction and CRM contact notes.</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="notes-placeholder">
-              <StickyNote size={20} />
-              Transaction notes will appear here.
+            <form className="notes-form" onSubmit={handleAddNote}>
+              <textarea
+                onChange={(event) => setNoteText(event.target.value)}
+                placeholder="Add a transaction note..."
+                value={noteText}
+              />
+              <Button disabled={isSavingNote || !noteText.trim()} type="submit">
+                <StickyNote size={16} />
+                {isSavingNote ? "Saving..." : "Add Note"}
+              </Button>
+            </form>
+            <div className="notes-list">
+              {transactionNotes.map((note) => (
+                <article className="note-row" key={note.id}>
+                  <div>
+                    <Badge variant={note.source === "CRM" ? "default" : "muted"}>
+                      {note.source}
+                    </Badge>
+                    <span>{formatDate(note.createdAt)}</span>
+                  </div>
+                  <p>{note.body}</p>
+                  {note.syncStatus !== "synced" ? (
+                    <small>{note.lastSyncError || statusLabel(note.syncStatus)}</small>
+                  ) : null}
+                </article>
+              ))}
+              {isLoadingNotes ? <p className="empty-state">Loading notes...</p> : null}
+              {!isLoadingNotes && !transactionNotes.length ? (
+                <div className="notes-placeholder">
+                  <StickyNote size={20} />
+                  No notes yet.
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -1143,3 +1246,8 @@ export default function TransactionDetail() {
     </div>
   );
 }
+
+
+
+
+

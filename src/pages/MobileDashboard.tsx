@@ -1,4 +1,4 @@
-import { format, isBefore, startOfTomorrow } from "date-fns";
+﻿import { format, isBefore, startOfTomorrow } from "date-fns";
 import {
   Bell,
   CalendarClock,
@@ -64,7 +64,7 @@ function documentSummary(documents: TransactionDocument[]) {
     ["uploaded", "approved", "completed"].includes(document.status),
   ).length;
 
-  return `${uploaded} uploaded · ${needed} needed · ${missing} missing`;
+  return `${uploaded} uploaded Â· ${needed} needed Â· ${missing} missing`;
 }
 
 function transactionTitle(transaction: Opportunity) {
@@ -198,6 +198,10 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
   const [renamingDocumentId, setRenamingDocumentId] = useState("");
   const [renameValue, setRenameValue] = useState("");
   const [preparedDocumentKeys, setPreparedDocumentKeys] = useState<string[]>([]);
+  const [noteText, setNoteText] = useState("");
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isLoadingNotes, setIsLoadingNotes] = useState(false);
+  const [notesLoadedFor, setNotesLoadedFor] = useState("");
 
   useEffect(() => {
     setStoredActiveLocationId(locationId);
@@ -319,6 +323,36 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
     selectedTransaction,
   ]);
 
+
+  useEffect(() => {
+    if (
+      !selectedTransaction ||
+      !selectedTransaction.id ||
+      notesLoadedFor === String(selectedTransaction.id)
+    ) {
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingNotes(true);
+
+    data.fetchTransactionNotes(String(selectedTransaction.id))
+      .catch((error) => {
+        if (isMounted) {
+          console.warn("DoorScale mobile notes are still loading:", error);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setNotesLoadedFor(String(selectedTransaction.id));
+          setIsLoadingNotes(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [data.fetchTransactionNotes, notesLoadedFor, selectedTransaction]);
   async function handleStageChange(stage: TransactionStage) {
     if (!selectedTransaction) return;
 
@@ -343,6 +377,29 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
     }
   }
 
+
+  async function handleAddNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedTransaction || !noteText.trim()) return;
+
+    setMessage("");
+    setErrorMessage("");
+    setIsSavingNote(true);
+
+    try {
+      const noteMessage = await data.createTransactionNote({
+        body: noteText,
+        transactionId: String(selectedTransaction.id),
+      });
+      setNoteText("");
+      setMessage(noteMessage || "Note saved.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save note.");
+    } finally {
+      setIsSavingNote(false);
+    }
+  }
   async function handleAddTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -688,7 +745,7 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
               <article className="mobile-row" key={task.id}>
                 <div>
                   <h3>{task.title}</h3>
-                  <p>{formatDate(task.dueDateTime || task.dueDate)} · {task.assignedTo || "Unassigned"}</p>
+                  <p>{formatDate(task.dueDateTime || task.dueDate)} Â· {task.assignedTo || "Unassigned"}</p>
                 </div>
                 <div className="mobile-row__actions">
                   <Button
@@ -1232,3 +1289,6 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
     </main>
   );
 }
+
+
+
