@@ -1099,7 +1099,7 @@ async function fetchCrmData(
   logDiagnostic("fetchCrmData started", {
     activeLocationId,
     fetchId,
-    mode: "parallel base queries, sequential checklist generation",
+    mode: "parallel base queries",
   });
 
   const transactionsQueryStartedAt = performance.now();
@@ -1170,48 +1170,9 @@ async function fetchCrmData(
         activeLocationId,
         (tasksResult.data ?? []) as SupabaseTask[],
       );
-  let documents = documentsResult.error
+  const documents = documentsResult.error
     ? []
     : ((documentsResult.data ?? []) as SupabaseTransactionDocument[]);
-
-  let createdDocumentRows = false;
-  try {
-    const checklistStartedAt = performance.now();
-    createdDocumentRows = await ensureDocumentChecklists(
-      client,
-      activeLocationId,
-      transactions,
-    );
-    logDiagnostic("fetchCrmData document checklist generation completed", {
-      activeLocationId,
-      createdDocumentRows,
-      durationMs: Math.round(performance.now() - checklistStartedAt),
-      fetchId,
-      transactionCount: transactions.length,
-    });
-  } catch (checklistError) {
-    console.warn("DoorScale document checklist generation skipped:", {
-      activeLocationId,
-      error: checklistError,
-    });
-  }
-
-  if (createdDocumentRows) {
-    const refreshedDocumentsResult = await loadLocationDocuments(
-      client,
-      activeLocationId,
-    );
-
-    if (refreshedDocumentsResult.error) {
-      console.error("DoorScale document checklist reload failed:", {
-        activeLocationId,
-        error: refreshedDocumentsResult.error,
-      });
-    } else {
-      documents =
-        (refreshedDocumentsResult.data ?? []) as SupabaseTransactionDocument[];
-    }
-  }
 
   logDiagnostic("fetchCrmData completed", {
     activeLocationId,
@@ -1506,26 +1467,6 @@ async function generateDocumentChecklist(
   });
 
   return true;
-}
-
-async function ensureDocumentChecklists(
-  client: SupabaseClient,
-  activeLocationId: string,
-  transactions: SupabaseTransaction[],
-) {
-  let createdRows = false;
-  for (const transaction of transactions) {
-    const created = await generateDocumentChecklist(
-      client,
-      activeLocationId,
-      transaction.id,
-      transaction.transaction_type || "",
-      transaction.stage || "",
-    );
-    createdRows ||= Boolean(created);
-  }
-
-  return createdRows;
 }
 
 const emptyData: CrmDataState = {
@@ -1944,29 +1885,35 @@ export function useCrmData() {
         }));
       }
 
-      void generateChecklistTasks(
-        client,
-        locationId,
-        result.transactionId,
-        input.transactionType,
-        input.stage,
-      ).catch((taskChecklistError) => {
-        console.error("DoorScale new transaction task checklist generation failed:", {
-          error: taskChecklistError,
-          transactionId: result.transactionId,
-        });
-      });
-      void generateDocumentChecklist(
-        client,
-        locationId,
-        result.transactionId,
-        input.transactionType,
-        input.stage,
-      ).catch((documentChecklistError) => {
-        console.error("DoorScale new transaction document checklist generation failed:", {
-          error: documentChecklistError,
-          transactionId: result.transactionId,
-        });
+      void Promise.allSettled([
+        generateChecklistTasks(
+          client,
+          locationId,
+          result.transactionId,
+          input.transactionType,
+          input.stage,
+        ),
+        generateDocumentChecklist(
+          client,
+          locationId,
+          result.transactionId,
+          input.transactionType,
+          input.stage,
+        ),
+      ]).then(([taskChecklistResult, documentChecklistResult]) => {
+        if (taskChecklistResult.status === "rejected") {
+          console.error("DoorScale new transaction task checklist generation failed:", {
+            error: taskChecklistResult.reason,
+            transactionId: result.transactionId,
+          });
+        }
+
+        if (documentChecklistResult.status === "rejected") {
+          console.error("DoorScale new transaction document checklist generation failed:", {
+            error: documentChecklistResult.reason,
+            transactionId: result.transactionId,
+          });
+        }
       });
 
       return result.ok === false
@@ -2051,34 +1998,36 @@ export function useCrmData() {
         ),
       }));
 
-      try {
-        await generateChecklistTasks(
-          client,
-          locationId,
-          input.transactionId,
-          input.transactionType,
-          input.stage,
-        );
-      } catch (taskChecklistError) {
+      const [taskChecklistResult, documentChecklistResult] =
+        await Promise.allSettled([
+          generateChecklistTasks(
+            client,
+            locationId,
+            input.transactionId,
+            input.transactionType,
+            input.stage,
+          ),
+          generateDocumentChecklist(
+            client,
+            locationId,
+            input.transactionId,
+            input.transactionType,
+            input.stage,
+          ),
+        ]);
+
+      if (taskChecklistResult.status === "rejected") {
         console.error("DoorScale stage task checklist refresh failed:", {
-          error: taskChecklistError,
+          error: taskChecklistResult.reason,
           stage: input.stage,
           transactionId: input.transactionId,
           transactionType: input.transactionType,
         });
       }
 
-      try {
-        await generateDocumentChecklist(
-          client,
-          locationId,
-          input.transactionId,
-          input.transactionType,
-          input.stage,
-        );
-      } catch (documentChecklistError) {
+      if (documentChecklistResult.status === "rejected") {
         console.error("DoorScale stage document checklist refresh failed:", {
-          error: documentChecklistError,
+          error: documentChecklistResult.reason,
           stage: input.stage,
           transactionId: input.transactionId,
           transactionType: input.transactionType,
@@ -2572,7 +2521,6 @@ export function useCrmData() {
       }
 
       await refreshData();
-      notifyDoorScaleDataChanged();
 
       return result.ok === false
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
