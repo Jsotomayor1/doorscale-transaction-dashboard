@@ -6,10 +6,14 @@ import {
   CheckSquare,
   ChevronLeft,
   CircleDollarSign,
+  ExternalLink,
+  Eye,
   FileText,
   Home,
   ListChecks,
+  Pencil,
   Plus,
+  RefreshCw,
   Upload,
   Workflow,
 } from "lucide-react";
@@ -74,6 +78,42 @@ function transactionTitle(transaction: Opportunity) {
 
 function statusLabel(status: string) {
   return status.replace(/_/g, " ");
+}
+
+function buildDocumentViewLink(
+  documentId: string,
+  transactionId: string,
+  locationId: string,
+) {
+  const params = new URLSearchParams({
+    action: "view",
+    document_id: documentId,
+    transaction_id: transactionId,
+    location_id: locationId,
+  });
+
+  return `/api/documents?${params.toString()}`;
+}
+
+function buildContactLink(locationId?: string, contactId?: string) {
+  if (!locationId || !contactId) return "";
+
+  return `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${contactId}`;
+}
+
+function buildOpportunityLink(locationId?: string, opportunityId?: string) {
+  if (!locationId || !opportunityId) return "";
+
+  return `https://app.gohighlevel.com/v2/location/${locationId}/opportunities/detail/${opportunityId}`;
+}
+
+function needsSync(transaction: Opportunity) {
+  return (
+    (transaction.syncStatus || "synced").toLowerCase() !== "synced" ||
+    !transaction.ghlContactId ||
+    !transaction.ghlOpportunityId ||
+    Boolean(transaction.lastSyncError)
+  );
 }
 
 const emptyTaskForm = {
@@ -142,10 +182,22 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
   const [mobileTab, setMobileTab] = useState<MobileTab>("overview");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [taskForm, setTaskForm] = useState(emptyTaskForm);
   const [editingTaskId, setEditingTaskId] = useState("");
   const [editingDueDate, setEditingDueDate] = useState("");
   const [editingDueTime, setEditingDueTime] = useState("");
+  const [savingStage, setSavingStage] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
+  const [completingTaskId, setCompletingTaskId] = useState("");
+  const [retryingTransactionId, setRetryingTransactionId] = useState("");
+  const [uploadingDocumentId, setUploadingDocumentId] = useState("");
+  const [manualDocumentName, setManualDocumentName] = useState("");
+  const [globalManualDocumentName, setGlobalManualDocumentName] = useState("");
+  const [globalUploadTransactionId, setGlobalUploadTransactionId] = useState("");
+  const [renamingDocumentId, setRenamingDocumentId] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  const [preparedDocumentKeys, setPreparedDocumentKeys] = useState<string[]>([]);
 
   useEffect(() => {
     setStoredActiveLocationId(locationId);
@@ -224,6 +276,18 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
           >
             View Transaction
           </button>
+          {needsSync(transaction) ? (
+            <Button
+              disabled={retryingTransactionId === String(transaction.id)}
+              onClick={() => void handleRetrySync(String(transaction.id))}
+              variant="secondary"
+            >
+              <RefreshCw size={16} />
+              {retryingTransactionId === String(transaction.id)
+                ? "Syncing..."
+                : "Retry Sync"}
+            </Button>
+          ) : null}
         </article>
       );
     });
@@ -231,24 +295,52 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
 
   useEffect(() => {
     if (!selectedTransaction) return;
+    if (selectedDocuments.length > 0) return;
+
+    const preparationKey = [
+      selectedTransaction.id,
+      selectedTransaction.stage,
+      selectedTransaction.customFields.transactionType,
+    ].join(":");
+
+    if (preparedDocumentKeys.includes(preparationKey)) return;
+
+    setPreparedDocumentKeys((currentKeys) => [...currentKeys, preparationKey]);
 
     void data.ensureTransactionDocuments({
       stage: selectedTransaction.stage,
       transactionId: String(selectedTransaction.id),
       transactionType: selectedTransaction.customFields.transactionType,
     });
-  }, [data, selectedTransaction]);
+  }, [
+    data.ensureTransactionDocuments,
+    preparedDocumentKeys,
+    selectedDocuments.length,
+    selectedTransaction,
+  ]);
 
   async function handleStageChange(stage: TransactionStage) {
     if (!selectedTransaction) return;
 
     setMessage("");
-    await data.updateTransactionStage({
-      stage,
-      transactionId: String(selectedTransaction.id),
-      transactionType: selectedTransaction.customFields.transactionType,
-    });
-    setMessage("Stage updated.");
+    setErrorMessage("");
+    setSavingStage(true);
+
+    try {
+      const updateMessage = await data.updateTransactionStage({
+        stage,
+        transactionId: String(selectedTransaction.id),
+        transactionType: selectedTransaction.customFields.transactionType,
+      });
+      setPreparedDocumentKeys((currentKeys) =>
+        currentKeys.filter((key) => !key.startsWith(`${selectedTransaction.id}:`)),
+      );
+      setMessage(updateMessage || "Stage updated.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to update stage.");
+    } finally {
+      setSavingStage(false);
+    }
   }
 
   async function handleAddTask(event: FormEvent<HTMLFormElement>) {
@@ -256,17 +348,27 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
 
     if (!selectedTransaction || !taskForm.title.trim()) return;
 
-    await data.createTask({
-      assignedTo: taskForm.assignedTo,
-      description: "",
-      dueDate: taskForm.dueDate,
-      dueTime: taskForm.dueTime,
-      status: "pending",
-      title: taskForm.title,
-      transactionId: String(selectedTransaction.id),
-    });
-    setTaskForm(emptyTaskForm);
-    setMessage("Task added.");
+    setMessage("");
+    setErrorMessage("");
+    setSavingTask(true);
+
+    try {
+      const taskMessage = await data.createTask({
+        assignedTo: taskForm.assignedTo,
+        description: "",
+        dueDate: taskForm.dueDate,
+        dueTime: taskForm.dueTime,
+        status: "pending",
+        title: taskForm.title,
+        transactionId: String(selectedTransaction.id),
+      });
+      setTaskForm(emptyTaskForm);
+      setMessage(taskMessage || "Task added.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save task.");
+    } finally {
+      setSavingTask(false);
+    }
   }
 
   async function handleDocumentUpload(
@@ -276,26 +378,53 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
     const file = event.target.files?.[0];
     event.target.value = "";
 
-    if (!selectedTransaction || !file) return;
+    const transactionId = String(document.transactionId || selectedTransaction?.id || "");
 
-    await data.uploadTransactionDocument({
-      documentId: document.id,
-      documentType: document.documentType,
-      file,
-      transactionId: String(selectedTransaction.id),
-    });
-    setMessage("Document uploaded.");
+    if (!transactionId || !file) return;
+
+    setMessage("");
+    setErrorMessage("");
+    setUploadingDocumentId(document.id);
+
+    try {
+      const uploadMessage = await data.uploadTransactionDocument({
+        documentId: document.id,
+        documentType: document.documentType,
+        file,
+        transactionId,
+      });
+      setMessage(uploadMessage.message || "Document uploaded.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to upload document.",
+      );
+    } finally {
+      setUploadingDocumentId("");
+    }
   }
 
-  async function handleDocumentStatus(documentId: string, status: string) {
-    if (!selectedTransaction) return;
+  async function handleDocumentStatus(
+    documentId: string,
+    status: string,
+    transactionId = selectedTransaction ? String(selectedTransaction.id) : "",
+  ) {
+    if (!transactionId) return;
 
-    await data.updateDocumentStatus({
-      documentId,
-      status: status as DocumentStatus,
-      transactionId: String(selectedTransaction.id),
-    });
-    setMessage("Document status updated.");
+    setMessage("");
+    setErrorMessage("");
+
+    try {
+      const statusMessage = await data.updateDocumentStatus({
+        documentId,
+        status: status as DocumentStatus,
+        transactionId,
+      });
+      setMessage(statusMessage.message || "Document status updated.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to update document.",
+      );
+    }
   }
 
   async function handleTaskDateSubmit(event: FormEvent<HTMLFormElement>) {
@@ -303,16 +432,121 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
 
     if (!editingTaskId) return;
 
-    await data.updateTaskDueDateTime({
-      dueDate: editingDueDate,
-      dueTime: editingDueTime,
-      taskId: editingTaskId,
-    });
-    setEditingTaskId("");
-    setMessage("Task updated.");
+    setMessage("");
+    setErrorMessage("");
+
+    try {
+      await data.updateTaskDueDateTime({
+        dueDate: editingDueDate,
+        dueTime: editingDueTime,
+        taskId: editingTaskId,
+      });
+      setEditingTaskId("");
+      setMessage("Task updated.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to update task.");
+    }
+  }
+
+  async function handleCompleteTask(taskId: string) {
+    setMessage("");
+    setErrorMessage("");
+    setCompletingTaskId(taskId);
+
+    try {
+      await data.markTaskCompleted(taskId);
+      setMessage("Task completed.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to complete task.",
+      );
+    } finally {
+      setCompletingTaskId("");
+    }
+  }
+
+  async function handleRetrySync(transactionId: string) {
+    setMessage("");
+    setErrorMessage("");
+    setRetryingTransactionId(transactionId);
+
+    try {
+      const retryMessage = await data.retryTransactionSync(transactionId);
+      setMessage(retryMessage || "Transaction synced.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to retry sync.");
+    } finally {
+      setRetryingTransactionId("");
+    }
+  }
+
+  async function handleManualDocumentUpload(
+    event: ChangeEvent<HTMLInputElement>,
+    transaction: Opportunity,
+    documentName: string,
+    resetDocumentName: () => void,
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    setMessage("");
+    setErrorMessage("");
+    setUploadingDocumentId(`manual-${transaction.id}`);
+
+    try {
+      const uploadMessage = await data.uploadTransactionDocument({
+        documentType: documentName.trim() || file.name || "Uploaded Document",
+        file,
+        transactionId: String(transaction.id),
+      });
+      resetDocumentName();
+      setMessage(uploadMessage.message || "Document uploaded.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to upload document.",
+      );
+    } finally {
+      setUploadingDocumentId("");
+    }
+  }
+
+  async function handleRenameDocument(document: TransactionDocument) {
+    const nextName = renameValue.trim();
+    const transactionId = String(document.transactionId || selectedTransaction?.id || "");
+
+    if (!transactionId || !nextName) return;
+
+    setMessage("");
+    setErrorMessage("");
+
+    try {
+      const renameMessage = await data.renameTransactionDocument({
+        documentId: document.id,
+        documentName: nextName,
+        transactionId,
+      });
+      setRenamingDocumentId("");
+      setRenameValue("");
+      setMessage(renameMessage.message || "Document renamed.");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to rename document.",
+      );
+    }
   }
 
   if (selectedTransaction) {
+    const contactLink = buildContactLink(
+      selectedTransaction.ghlLocationId || locationId,
+      selectedTransaction.ghlContactId,
+    );
+    const opportunityLink = buildOpportunityLink(
+      selectedTransaction.ghlLocationId || locationId,
+      selectedTransaction.ghlOpportunityId,
+    );
+
     return (
       <main className="mobile-shell">
         <header className="mobile-header">
@@ -334,6 +568,7 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
         </header>
 
         {message ? <p className="mobile-success">{message}</p> : null}
+        {errorMessage ? <p className="mobile-error">{errorMessage}</p> : null}
 
         <section className="mobile-card">
           <div className="mobile-card__header">
@@ -357,10 +592,55 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
               <dt>Contact</dt>
               <dd>{selectedTransaction.customFields.contactEmail || "Not set"}</dd>
             </div>
+            <div>
+              <dt>Sync</dt>
+              <dd>{statusLabel(selectedTransaction.syncStatus || "synced")}</dd>
+            </div>
           </dl>
+          <div className="mobile-action-grid">
+            {contactLink ? (
+              <a
+                className="mobile-secondary-link"
+                href={contactLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink size={16} />
+                Open Contact
+              </a>
+            ) : (
+              <span className="mobile-disabled-action">Contact not synced</span>
+            )}
+            {opportunityLink ? (
+              <a
+                className="mobile-secondary-link"
+                href={opportunityLink}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink size={16} />
+                Open Opportunity
+              </a>
+            ) : (
+              <span className="mobile-disabled-action">Opportunity not synced</span>
+            )}
+          </div>
+          {needsSync(selectedTransaction) ? (
+            <Button
+              disabled={retryingTransactionId === String(selectedTransaction.id)}
+              onClick={() => void handleRetrySync(String(selectedTransaction.id))}
+              variant="secondary"
+            >
+              <RefreshCw size={16} />
+              {retryingTransactionId === String(selectedTransaction.id)
+                ? "Syncing..."
+                : "Retry Sync"}
+            </Button>
+          ) : null}
           <label className="mobile-field">
             <span>Stage</span>
             <select
+              disabled={savingStage}
               onChange={(event) =>
                 void handleStageChange(event.target.value as TransactionStage)
               }
@@ -399,9 +679,11 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
               type="time"
               value={taskForm.dueTime}
             />
-            <Button type="submit">Add Task</Button>
+            <Button disabled={savingTask} type="submit">
+              {savingTask ? "Saving..." : "Add Task"}
+            </Button>
           </form>
-          <div className="mobile-list">
+          <div className="mobile-list mobile-scroll-list">
             {selectedTasks.map((task) => (
               <article className="mobile-row" key={task.id}>
                 <div>
@@ -410,12 +692,12 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
                 </div>
                 <div className="mobile-row__actions">
                   <Button
-                    disabled={!isOpenTask(task)}
-                    onClick={() => void data.markTaskCompleted(task.id)}
+                    disabled={!isOpenTask(task) || completingTaskId === task.id}
+                    onClick={() => void handleCompleteTask(task.id)}
                     variant="secondary"
                   >
                     <CheckCircle2 size={16} />
-                    Done
+                    {completingTaskId === task.id ? "Saving..." : "Done"}
                   </Button>
                   <Button
                     onClick={() => {
@@ -450,12 +732,21 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
 
         <section className="mobile-card">
           <h2>Documents</h2>
-          <div className="mobile-list">
+          <div className="mobile-list mobile-scroll-list">
             {selectedDocuments.length ? (
               selectedDocuments.map((document) => (
                 <article className="mobile-document" key={document.id}>
                   <div>
-                    <h3>{document.documentName || document.documentType}</h3>
+                    {renamingDocumentId === document.id ? (
+                      <input
+                        aria-label="Document name"
+                        className="mobile-text-input"
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        value={renameValue}
+                      />
+                    ) : (
+                      <h3>{document.documentName || document.documentType}</h3>
+                    )}
                     <p>
                       {statusLabel(document.status)}
                       {document.uploadedAt ? ` | Uploaded ${formatDate(document.uploadedAt)}` : ""}
@@ -484,10 +775,62 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
                       </option>
                     ))}
                   </select>
+                  <div className="mobile-document-actions">
+                    {document.doorScaleFileId ? (
+                      <a
+                        className="mobile-secondary-link"
+                        href={buildDocumentViewLink(
+                          document.id,
+                          String(selectedTransaction.id),
+                          locationId,
+                        )}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        <Eye size={16} />
+                        View File
+                      </a>
+                    ) : null}
+                    {renamingDocumentId === document.id ? (
+                      <>
+                        <Button
+                          onClick={() => void handleRenameDocument(document)}
+                          variant="secondary"
+                        >
+                          Save Name
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            setRenamingDocumentId("");
+                            setRenameValue("");
+                          }}
+                          variant="ghost"
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        onClick={() => {
+                          setRenamingDocumentId(document.id);
+                          setRenameValue(document.documentName || document.documentType);
+                        }}
+                        variant="ghost"
+                      >
+                        <Pencil size={16} />
+                        Rename
+                      </Button>
+                    )}
+                  </div>
                   <label className="mobile-upload-button">
                     <Upload size={16} />
-                    Upload
+                    {uploadingDocumentId === document.id
+                      ? "Uploading..."
+                      : document.doorScaleFileId
+                        ? "Replace File"
+                        : "Upload"}
                     <input
+                      disabled={uploadingDocumentId === document.id}
                       onChange={(event) => void handleDocumentUpload(document, event)}
                       type="file"
                     />
@@ -495,7 +838,37 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
                 </article>
               ))
             ) : (
-              <p className="mobile-muted">Document checklist is still preparing.</p>
+              <>
+                <p className="mobile-muted">
+                  No document checklist templates found for this transaction yet.
+                </p>
+                <div className="mobile-manual-upload">
+                  <input
+                    className="mobile-text-input"
+                    onChange={(event) => setManualDocumentName(event.target.value)}
+                    placeholder="Document name or type"
+                    value={manualDocumentName}
+                  />
+                  <label className="mobile-upload-button">
+                    <Upload size={16} />
+                    {uploadingDocumentId === `manual-${selectedTransaction.id}`
+                      ? "Uploading..."
+                      : "Upload Document"}
+                    <input
+                      disabled={uploadingDocumentId === `manual-${selectedTransaction.id}`}
+                      onChange={(event) =>
+                        void handleManualDocumentUpload(
+                          event,
+                          selectedTransaction,
+                          manualDocumentName,
+                          () => setManualDocumentName(""),
+                        )
+                      }
+                      type="file"
+                    />
+                  </label>
+                </div>
+              </>
             )}
           </div>
         </section>
@@ -532,6 +905,7 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
         {data.loading ? <span>Loading DoorScale data...</span> : null}
         {data.error ? <span className="mobile-error">{data.error}</span> : null}
         {message ? <span className="mobile-success">{message}</span> : null}
+        {errorMessage ? <span className="mobile-error">{errorMessage}</span> : null}
       </header>
 
       {mobileTab === "overview" ? (
@@ -567,8 +941,12 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
                     <h3>{task.title}</h3>
                     <p>{task.propertyAddress || task.clientName || "Transaction"}</p>
                   </div>
-                  <Button onClick={() => void data.markTaskCompleted(task.id)} variant="secondary">
-                    Done
+                  <Button
+                    disabled={completingTaskId === task.id}
+                    onClick={() => void handleCompleteTask(task.id)}
+                    variant="secondary"
+                  >
+                    {completingTaskId === task.id ? "Saving..." : "Done"}
                   </Button>
                 </article>
               ))}
@@ -617,11 +995,11 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
                   <p>{task.propertyAddress || task.clientName || "Transaction"}</p>
                 </div>
                 <Button
-                  disabled={!isOpenTask(task)}
-                  onClick={() => void data.markTaskCompleted(task.id)}
+                  disabled={!isOpenTask(task) || completingTaskId === task.id}
+                  onClick={() => void handleCompleteTask(task.id)}
                   variant="secondary"
                 >
-                  Done
+                  {completingTaskId === task.id ? "Saving..." : "Done"}
                 </Button>
               </article>
             ))}
@@ -635,16 +1013,169 @@ function MobileDashboardContent({ locationId }: { locationId: string }) {
             <h2>Documents</h2>
             <span>{documentUploadedCount} uploaded</span>
           </div>
+          <div className="mobile-manual-upload">
+            <select
+              aria-label="Transaction for upload"
+              className="mobile-text-input"
+              onChange={(event) => setGlobalUploadTransactionId(event.target.value)}
+              value={globalUploadTransactionId}
+            >
+              <option value="">Select transaction</option>
+              {data.opportunities.map((transaction) => (
+                <option key={transaction.id} value={String(transaction.id)}>
+                  {transactionTitle(transaction)}
+                </option>
+              ))}
+            </select>
+            <input
+              className="mobile-text-input"
+              onChange={(event) => setGlobalManualDocumentName(event.target.value)}
+              placeholder="Document name or type"
+              value={globalManualDocumentName}
+            />
+            <label className="mobile-upload-button">
+              <Upload size={16} />
+              {uploadingDocumentId === "global-manual"
+                ? "Uploading..."
+                : "Upload Document"}
+              <input
+                disabled={!globalUploadTransactionId || uploadingDocumentId === "global-manual"}
+                onChange={(event) => {
+                  const transaction = data.opportunities.find(
+                    (currentTransaction) =>
+                      String(currentTransaction.id) === String(globalUploadTransactionId),
+                  );
+
+                  if (!transaction) {
+                    event.target.value = "";
+                    setErrorMessage("Select a transaction before uploading.");
+                    return;
+                  }
+
+                  setUploadingDocumentId("global-manual");
+                  void handleManualDocumentUpload(
+                    event,
+                    transaction,
+                    globalManualDocumentName,
+                    () => setGlobalManualDocumentName(""),
+                  );
+                }}
+                type="file"
+              />
+            </label>
+          </div>
           <div className="mobile-list">
             {data.documents.map((document) => (
-              <article className="mobile-row" key={document.id}>
+              <article className="mobile-document" key={document.id}>
                 <div>
-                  <h3>{document.documentName || document.documentType}</h3>
-                  <p>{statusLabel(document.status)}</p>
+                  {renamingDocumentId === document.id ? (
+                    <input
+                      aria-label="Document name"
+                      className="mobile-text-input"
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      value={renameValue}
+                    />
+                  ) : (
+                    <h3>{document.documentName || document.documentType}</h3>
+                  )}
+                  <p>
+                    {statusLabel(document.status)}
+                    {document.uploadedAt ? ` | Uploaded ${formatDate(document.uploadedAt)}` : ""}
+                  </p>
+                  {document.fileName ? <p>{document.fileName}</p> : null}
                 </div>
                 <Badge variant="default">{statusLabel(document.status)}</Badge>
+                <select
+                  onChange={(event) =>
+                    void handleDocumentStatus(
+                      document.id,
+                      event.target.value,
+                      String(document.transactionId),
+                    )
+                  }
+                  value={document.status}
+                >
+                  {[
+                    "needed",
+                    "sent",
+                    "viewed",
+                    "completed",
+                    "uploaded",
+                    "pending_review",
+                    "approved",
+                    "rejected",
+                    "missing",
+                  ].map((status) => (
+                    <option key={status} value={status}>
+                      {statusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+                <div className="mobile-document-actions">
+                  {document.doorScaleFileId ? (
+                    <a
+                      className="mobile-secondary-link"
+                      href={buildDocumentViewLink(
+                        document.id,
+                        String(document.transactionId),
+                        locationId,
+                      )}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <Eye size={16} />
+                      View File
+                    </a>
+                  ) : null}
+                  {renamingDocumentId === document.id ? (
+                    <>
+                      <Button
+                        onClick={() => void handleRenameDocument(document)}
+                        variant="secondary"
+                      >
+                        Save Name
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setRenamingDocumentId("");
+                          setRenameValue("");
+                        }}
+                        variant="ghost"
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      onClick={() => {
+                        setRenamingDocumentId(document.id);
+                        setRenameValue(document.documentName || document.documentType);
+                      }}
+                      variant="ghost"
+                    >
+                      <Pencil size={16} />
+                      Rename
+                    </Button>
+                  )}
+                </div>
+                <label className="mobile-upload-button">
+                  <Upload size={16} />
+                  {uploadingDocumentId === document.id
+                    ? "Uploading..."
+                    : document.doorScaleFileId
+                      ? "Replace File"
+                      : "Upload"}
+                  <input
+                    disabled={uploadingDocumentId === document.id}
+                    onChange={(event) => void handleDocumentUpload(document, event)}
+                    type="file"
+                  />
+                </label>
               </article>
             ))}
+            {!data.documents.length ? (
+              <p className="mobile-muted">No documents uploaded yet.</p>
+            ) : null}
           </div>
         </section>
       ) : null}

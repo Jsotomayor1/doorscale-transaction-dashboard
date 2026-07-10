@@ -1896,6 +1896,79 @@
   font-size: 1.2rem;
 }
 
+.mobile-scroll-list {
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-color: rgba(37, 99, 235, 0.34) transparent;
+  scrollbar-width: thin;
+}
+
+.mobile-action-grid,
+.mobile-document-actions,
+.mobile-manual-upload {
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mobile-document-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mobile-secondary-link,
+.mobile-disabled-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--ds-border);
+  border-radius: 8px;
+  color: var(--ds-blue);
+  background: #eff6ff;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+}
+
+.mobile-disabled-action {
+  color: var(--ds-muted);
+  background: #f8fafc;
+}
+
+.mobile-text-input,
+.mobile-manual-upload select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--ds-border);
+  border-radius: 8px;
+  padding: 0 11px;
+  color: var(--ds-text);
+  background: #ffffff;
+  font: inherit;
+}
+
+.mobile-document .button,
+.mobile-document .mobile-upload-button,
+.mobile-document-actions .button {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+}
+
+.mobile-document select {
+  min-width: 0;
+}
+
 .mobile-bottom-nav {
   position: fixed;
   right: 0;
@@ -2031,5 +2104,14 @@
   .document-page-row .button,
   .document-page-row button {
     flex-basis: 100%;
+  }
+
+  .mobile-action-grid,
+  .mobile-document-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-scroll-list {
+    max-height: 330px;
   }
 }
