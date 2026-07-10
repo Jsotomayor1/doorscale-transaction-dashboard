@@ -20,6 +20,7 @@ type MultipartPart = {
 };
 
 type TransactionRow = {
+  contact_id?: string | null;
   ghl_contact_id?: string | null;
   ghl_opportunity_id?: string | null;
   id: string;
@@ -346,7 +347,7 @@ export default async function handler(
 
     const { data: transaction, error: transactionError } = await supabase
       .from("transactions")
-      .select("id, location_id, ghl_contact_id, ghl_opportunity_id, property_address, stage, transaction_type")
+      .select("id, location_id, contact_id, ghl_contact_id, ghl_opportunity_id, property_address, stage, transaction_type")
       .eq("id", transactionId)
       .eq("location_id", activeLocation.activeLocationId)
       .maybeSingle();
@@ -504,8 +505,19 @@ export default async function handler(
     });
 
     const contactId =
-      documentRecord.doorscale_contact_id || transactionRow.ghl_contact_id || null;
+      transactionRow.ghl_contact_id ||
+      transactionRow.contact_id ||
+      documentRecord.doorscale_contact_id ||
+      null;
     const uploadedAt = new Date().toISOString();
+
+    console.log("DoorScale document contact resolution:", {
+      documentName: documentType,
+      resolvedGhlContactId: contactId || null,
+      propertyAddress: transactionRow.property_address || null,
+      transactionId,
+    });
+
     const payload = {
       doorscale_file_id: filePath,
       document_name: documentType,
@@ -575,6 +587,15 @@ export default async function handler(
     let mirrorError = "";
 
     try {
+      if (!contactId) {
+        console.log("Document uploaded locally; contact not synced yet.", {
+          documentName: documentType,
+          propertyAddress: transactionRow.property_address || null,
+          transactionId,
+        });
+        throw new Error("Document uploaded locally; contact not synced yet.");
+      }
+
       const mirrorResult = await mirrorDocumentToGhlContact({
         accessToken: activeLocation.access_token,
         contactId,

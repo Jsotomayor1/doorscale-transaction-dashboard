@@ -1834,6 +1834,7 @@ export function useCrmData() {
       const result = await parseTaskWriteResponse(response);
 
       await refreshData();
+      notifyDoorScaleDataChanged();
 
       if (result.ok === false) {
         return result.message || "Task saved locally. DoorScale sync will retry later.";
@@ -2267,6 +2268,7 @@ export function useCrmData() {
             : document,
         ),
       }));
+      notifyDoorScaleDataChanged();
 
       return {
         message: result.message || "Document renamed.",
@@ -2345,6 +2347,7 @@ export function useCrmData() {
             },
           ),
         }));
+        notifyDoorScaleDataChanged();
         return {
           message: result.message || "Document uploaded.",
           status: response.status,
@@ -2352,6 +2355,7 @@ export function useCrmData() {
       }
 
       await refreshData();
+      notifyDoorScaleDataChanged();
       return {
         message: result.message || "Document uploaded.",
         status: response.status,

@@ -62,6 +62,10 @@ function getDueDateTime(body: CreateTaskBody) {
   return body.dueDateTime || body.dueDate || null;
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Task saved locally. DoorScale sync will retry later.";
+}
+
 export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
@@ -109,6 +113,11 @@ export default async function handler(
 
   const transactionRow = transaction as TransactionRow;
   const contactId = transactionRow.ghl_contact_id ?? transactionRow.contact_id;
+  console.log("DoorScale task contact resolution:", {
+    resolvedGhlContactId: contactId || null,
+    taskTitle: body.title,
+    transactionId: body.transactionId,
+  });
   const dueDateTime = getDueDateTime(body);
   const localTask = {
     assigned_to: body.assignedTo || null,
@@ -125,6 +134,7 @@ export default async function handler(
 
   let externalTaskId: string | undefined;
   let writeBackFailed = false;
+  let syncErrorMessage = "";
 
   try {
     const connectedAccount = await getActiveLocation(
@@ -145,6 +155,7 @@ export default async function handler(
       assignedTo: body.assignedTo || undefined,
       contactId,
       dueDate: dueDateTime || undefined,
+      locationId: connectedAccount.location_id,
       opportunityId: transactionRow.ghl_opportunity_id || undefined,
       body: body.description || undefined,
       title: body.title,
@@ -155,6 +166,8 @@ export default async function handler(
       contactIdExists: Boolean(contactId),
       endpoint,
       locationId: connectedAccount.location_id,
+      taskId: body.taskId || null,
+      taskTitle: body.title,
       transactionId: body.transactionId,
     });
 
@@ -176,6 +189,8 @@ export default async function handler(
     console.log("DoorScale task create response:", {
       endpoint,
       status: taskResponse.status,
+      taskId: body.taskId || null,
+      taskTitle: body.title,
     });
 
     if (!taskResponse.ok) {
@@ -190,19 +205,25 @@ export default async function handler(
     console.log("DoorScale task create result:", {
       externalTaskId: externalTaskId || null,
       status: taskResponse.status,
+      taskTitle: body.title,
     });
   } catch (error) {
     writeBackFailed = true;
-    console.error("DoorScale task create write-back failed:", error);
+    syncErrorMessage = getErrorMessage(error);
+    console.error("DoorScale task create write-back failed:", {
+      error: syncErrorMessage,
+      resolvedGhlContactId: contactId || null,
+      taskId: body.taskId || null,
+      taskTitle: body.title,
+      transactionId: body.transactionId,
+    });
   }
 
   const taskRow = {
     ...localTask,
     ghl_task_id: externalTaskId ?? null,
     sync_status: writeBackFailed ? "pending_sync" : "synced",
-    last_sync_error: writeBackFailed
-      ? "Task saved locally. DoorScale sync will retry later."
-      : null,
+    last_sync_error: writeBackFailed ? syncErrorMessage : null,
     last_synced_at: writeBackFailed ? null : new Date().toISOString(),
   };
   async function saveTask(payload: TaskRowPayload) {

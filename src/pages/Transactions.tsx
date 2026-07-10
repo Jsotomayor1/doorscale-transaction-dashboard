@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
-import { CalendarClock, Filter, Home, Search } from "lucide-react";
+import { CalendarClock, Filter, Home, RefreshCw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -47,8 +48,11 @@ function participantLine(transaction: Transaction) {
 }
 
 export default function Transactions() {
-  const { error, loading, transactions } = useCRMData();
+  const { error, loading, retryTransactionSync, transactions } = useCRMData();
   const [searchParams] = useSearchParams();
+  const [retryingTransactionId, setRetryingTransactionId] = useState("");
+  const [syncMessage, setSyncMessage] = useState("");
+  const [syncError, setSyncError] = useState("");
   const [stageFilter, setStageFilter] = useState(
     searchParams.get("stage") || "all",
   );
@@ -70,6 +74,31 @@ export default function Transactions() {
     return stageMatches && typeMatches;
   });
 
+  function needsSync(transaction: Transaction) {
+    return (
+      (transaction.syncStatus || "synced").toLowerCase() !== "synced" ||
+      !transaction.ghlContactId ||
+      !transaction.ghlOpportunityId
+    );
+  }
+
+  async function handleRetrySync(transactionId: string) {
+    setSyncMessage("");
+    setSyncError("");
+    setRetryingTransactionId(transactionId);
+
+    try {
+      const message = await retryTransactionSync(transactionId);
+      setSyncMessage(message || "Transaction synced.");
+    } catch (retryError) {
+      setSyncError(
+        retryError instanceof Error ? retryError.message : "Unable to retry sync.",
+      );
+    } finally {
+      setRetryingTransactionId("");
+    }
+  }
+
   return (
     <div className="dashboard">
       <header className="dashboard__header">
@@ -79,6 +108,8 @@ export default function Transactions() {
           <p>Filter every DoorScale transaction by stage and type.</p>
           {loading ? <p className="dashboard__status">Loading DoorScale data...</p> : null}
           {error ? <p className="dashboard__error">{error}</p> : null}
+          {syncMessage ? <p className="dashboard__success">{syncMessage}</p> : null}
+          {syncError ? <p className="dashboard__error">{syncError}</p> : null}
         </div>
       </header>
 
@@ -173,6 +204,22 @@ export default function Transactions() {
                     <dd>{transaction.documentCounts?.uploaded ?? 0}</dd>
                   </div>
                 </dl>
+                {needsSync(transaction) ? (
+                  <Button
+                    disabled={retryingTransactionId === transaction.id}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void handleRetrySync(transaction.id);
+                    }}
+                    variant="secondary"
+                  >
+                    <RefreshCw size={15} />
+                    {retryingTransactionId === transaction.id
+                      ? "Syncing..."
+                      : "Retry Sync"}
+                  </Button>
+                ) : null}
               </CardContent>
             </Card>
           </Link>
