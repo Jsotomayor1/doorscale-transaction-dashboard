@@ -1782,29 +1782,101 @@ export function useCrmData() {
         throw new Error("Transaction was created, but no id was returned.");
       }
 
-      await generateChecklistTasks(
-        client,
-        locationId,
-        result.transactionId,
-        input.transactionType,
-        input.stage,
-      );
-      await generateDocumentChecklist(
-        client,
-        locationId,
-        result.transactionId,
-        input.transactionType,
-        input.stage,
-      );
+      if (result.transaction) {
+        setData((currentData) =>
+          mergeSyncedTransaction(currentData, result.transaction ?? {}),
+        );
+      } else {
+        const createdAt = new Date().toISOString();
+        const commission = Number(input.commission || 0);
+        const fallbackTransaction: Transaction = {
+          id: result.transactionId,
+          clientName:
+            [input.clientFirstName, input.clientLastName].filter(Boolean).join(" ") ||
+            input.buyerName ||
+            input.sellerName ||
+            input.propertyAddress ||
+            "Unknown Client",
+          propertyAddress: input.propertyAddress,
+          type: input.transactionType,
+          stage: input.stage,
+          closeDate: input.closingDate,
+          inspectionDate: input.inspectionDate,
+          contractValue: commission,
+          commission,
+          status: "active",
+          buyerName: input.buyerName,
+          clientEmail: input.clientEmail,
+          clientFirstName: input.clientFirstName,
+          clientLastName: input.clientLastName,
+          clientPhone: input.clientPhone,
+          sellerName: input.sellerName,
+          createdAt,
+          updatedAt: createdAt,
+          tasks: [],
+        };
 
-      await refreshData();
-      notifyDoorScaleDataChanged();
+        setData((currentData) => ({
+          ...currentData,
+          transactions: [fallbackTransaction, ...currentData.transactions],
+          opportunities: [
+            toOpportunity(
+              {
+                id: fallbackTransaction.id,
+                location_id: locationId,
+                property_address: fallbackTransaction.propertyAddress,
+                transaction_type: fallbackTransaction.type,
+                stage: fallbackTransaction.stage,
+                buyer_name: fallbackTransaction.buyerName,
+                seller_name: fallbackTransaction.sellerName,
+                client_email: fallbackTransaction.clientEmail,
+                client_first_name: fallbackTransaction.clientFirstName,
+                client_last_name: fallbackTransaction.clientLastName,
+                client_phone: fallbackTransaction.clientPhone,
+                closing_date: fallbackTransaction.closeDate,
+                inspection_date: fallbackTransaction.inspectionDate,
+                commission: fallbackTransaction.commission,
+                status: fallbackTransaction.status,
+                created_at: fallbackTransaction.createdAt,
+                updated_at: fallbackTransaction.updatedAt,
+              } as SupabaseTransaction,
+              [],
+            ),
+            ...currentData.opportunities,
+          ],
+        }));
+      }
+
+      void generateChecklistTasks(
+        client,
+        locationId,
+        result.transactionId,
+        input.transactionType,
+        input.stage,
+      ).catch((taskChecklistError) => {
+        console.error("DoorScale new transaction task checklist generation failed:", {
+          error: taskChecklistError,
+          transactionId: result.transactionId,
+        });
+      });
+      void generateDocumentChecklist(
+        client,
+        locationId,
+        result.transactionId,
+        input.transactionType,
+        input.stage,
+      ).catch((documentChecklistError) => {
+        console.error("DoorScale new transaction document checklist generation failed:", {
+          error: documentChecklistError,
+          transactionId: result.transactionId,
+        });
+      });
 
       return result.ok === false
         ? result.message || "Stage saved locally. DoorScale sync will retry."
-        : undefined;
+        : "Transaction saved.";
     },
-    [activeLocationId, refreshData],
+    [activeLocationId],
   );
 
   const updateTransactionStage = useCallback(
