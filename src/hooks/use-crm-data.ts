@@ -2088,9 +2088,32 @@ export function useCrmData() {
         }),
       });
       const result = await parseTaskWriteResponse(response);
+      const relatedTransaction = data.transactions.find(
+        (transaction) => String(transaction.id) === String(input.transactionId),
+      );
+      const createdTask: DashboardTask = {
+        id: result.taskId || `task-${Date.now()}`,
+        assignedTo: input.assignedTo,
+        clientName: relatedTransaction?.clientName ?? "",
+        description: input.description,
+        dueDate: input.dueDate,
+        dueDateTime: dueDateTime ?? input.dueDate ?? "",
+        propertyAddress: relatedTransaction?.propertyAddress ?? "",
+        relatedOpportunityId: input.transactionId,
+        status: input.status || "pending",
+        syncStatus: result.syncStatus || (result.ok === false ? "pending_sync" : "synced"),
+        lastSyncError: result.ok === false ? result.message || "" : "",
+        title: input.title,
+        transactionId: input.transactionId,
+      };
 
-      await refreshData();
-      notifyDoorScaleDataChanged();
+      setData((currentData) => ({
+        ...currentData,
+        tasks: [
+          createdTask,
+          ...currentData.tasks.filter((task) => task.id !== createdTask.id),
+        ],
+      }));
 
       if (result.ok === false) {
         return result.message || "Task saved locally. DoorScale sync will retry later.";
@@ -2098,7 +2121,7 @@ export function useCrmData() {
 
       return result.message || "Task saved.";
     },
-    [activeLocationId, refreshData],
+    [activeLocationId, data.transactions],
   );
 
   const markTaskCompleted = useCallback(
