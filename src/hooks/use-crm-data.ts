@@ -247,6 +247,7 @@ export type DocumentStatusCounts = Record<DocumentStatus, number>;
 type TaskWriteResponse = {
   message?: string;
   ok?: boolean;
+  syncStatus?: string;
   taskId?: string;
 };
 
@@ -2109,6 +2110,8 @@ export function useCrmData() {
         taskId,
       });
 
+      const previousTask = data.tasks.find((task) => task.id === taskId);
+
       if (isDemoMode()) {
         setData((currentData) => ({
           ...currentData,
@@ -2124,65 +2127,108 @@ export function useCrmData() {
         return;
       }
 
+      if (!previousTask) {
+        throw new Error("Task not found.");
+      }
+
       const locationId = activeLocationId || (await getActiveLocationId());
 
       if (!locationId) {
         throw new Error("Connect DoorScale to save task data.");
       }
 
-      logDiagnostic("task completion request sent", {
-        endpoint: "/api/ghl",
-        locationId,
+      setData((currentData) => ({
+        ...currentData,
+        tasks: currentData.tasks.map((task) =>
+          task.id === taskId
+            ? {
+                ...task,
+                status: "completed",
+              }
+            : task,
+        ),
+      }));
+      logDiagnostic("task completion optimistic state updated", {
         requestId,
         taskId,
       });
 
-      const response = await fetchWithTimeout("/api/ghl", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getDoorScaleLocationHeaders(locationId),
-        },
-        body: JSON.stringify({
-          action: "updateTask",
-          active_location_id: locationId,
+      try {
+        logDiagnostic("task completion request sent", {
+          endpoint: "/api/ghl",
           locationId,
-          status: "completed",
+          requestId,
           taskId,
-        }),
-      }, 30000);
+        });
 
-      logDiagnostic("task completion response received", {
-        durationMs: Math.round(performance.now() - startedAt),
-        requestId,
-        responseStatus: response.status,
-        taskId,
-      });
-      const result = await parseTaskWriteResponse(response);
+        const response = await fetchWithTimeout("/api/ghl", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getDoorScaleLocationHeaders(locationId),
+          },
+          body: JSON.stringify({
+            action: "updateTask",
+            active_location_id: locationId,
+            locationId,
+            status: "completed",
+            taskId,
+          }),
+        }, 30000);
 
-      logDiagnostic("task completion refetch started", {
-        requestId,
-        taskId,
-      });
-      await refreshData();
-      logDiagnostic("task completion refetch completed", {
-        durationMs: Math.round(performance.now() - startedAt),
-        requestId,
-        taskId,
-      });
+        logDiagnostic("task completion response received", {
+          durationMs: Math.round(performance.now() - startedAt),
+          requestId,
+          responseStatus: response.status,
+          taskId,
+        });
+        const result = await parseTaskWriteResponse(response);
 
-      if (result.ok === false) {
-        throw new Error(
-          result.message || "Task saved locally. DoorScale sync will retry later.",
-        );
+        setData((currentData) => ({
+          ...currentData,
+          tasks: currentData.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  lastSyncError:
+                    result.ok === false
+                      ? result.message || task.lastSyncError
+                      : task.lastSyncError,
+                  status: "completed",
+                  syncStatus: result.syncStatus || task.syncStatus,
+                }
+              : task,
+          ),
+        }));
+        logDiagnostic("task completion server result applied", {
+          durationMs: Math.round(performance.now() - startedAt),
+          requestId,
+          resultOk: result.ok,
+          syncStatus: result.syncStatus || null,
+          taskId,
+        });
+        logDiagnostic("task completion handler completed", {
+          durationMs: Math.round(performance.now() - startedAt),
+          requestId,
+          taskId,
+        });
+      } catch (completionError) {
+        setData((currentData) => ({
+          ...currentData,
+          tasks: currentData.tasks.map((task) =>
+            task.id === taskId ? previousTask : task,
+          ),
+        }));
+        logDiagnostic("task completion optimistic state reverted", {
+          error: completionError instanceof Error ? completionError.message : String(completionError),
+          requestId,
+          taskId,
+        });
+
+        throw completionError;
       }
-      logDiagnostic("task completion handler completed", {
-        durationMs: Math.round(performance.now() - startedAt),
-        requestId,
-        taskId,
-      });
     },
-    [activeLocationId, refreshData],
+    [activeLocationId, data.tasks],
   );
 
   const updateTaskDueDateTime = useCallback(
