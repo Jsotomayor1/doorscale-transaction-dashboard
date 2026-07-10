@@ -2520,13 +2520,11 @@ export function useCrmData() {
         );
       }
 
-      await refreshData();
-
       return result.ok === false
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
         : "Transaction synced.";
     },
-    [activeLocationId, data.opportunities, data.transactions, refreshData],
+    [activeLocationId, data.opportunities, data.transactions],
   );
 
   const retryTaskSync = useCallback(

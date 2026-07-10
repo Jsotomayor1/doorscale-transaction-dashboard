@@ -78,7 +78,8 @@ export default function Transactions() {
     return (
       (transaction.syncStatus || "synced").toLowerCase() !== "synced" ||
       !transaction.ghlContactId ||
-      !transaction.ghlOpportunityId
+      !transaction.ghlOpportunityId ||
+      Boolean(transaction.lastSyncError)
     );
   }
 

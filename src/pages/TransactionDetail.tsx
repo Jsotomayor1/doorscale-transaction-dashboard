@@ -522,11 +522,10 @@ export default function TransactionDetail() {
   }
 
   const transactionNeedsSync =
-    ["pending_sync", "sync_error"].includes(
-      (transaction.syncStatus || "synced").toLowerCase(),
-    ) ||
+    (transaction.syncStatus || "synced").toLowerCase() !== "synced" ||
     !transaction.ghlContactId ||
-    !transaction.ghlOpportunityId;
+    !transaction.ghlOpportunityId ||
+    Boolean(transaction.lastSyncError);
 
   return (
     <div className="dashboard transaction-workspace">
