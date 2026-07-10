@@ -5,9 +5,10 @@ import {
   getRequestedLocationId,
   logRouteDataCounts,
 } from "../_active-location.js";
-
-const TASKS_URL_BASE = "https://services.leadconnectorhq.com/locations";
-const API_VERSION = "2021-07-28";
+import {
+  syncTaskToDoorScale,
+  type TaskSyncStatus,
+} from "./sync.js";
 
 type TransactionRow = {
   contact_id: string | null;
@@ -45,20 +46,6 @@ type TaskRowPayload = {
   transaction_id: string;
 };
 
-type DoorScaleTaskResponse = {
-  id?: string;
-  _id?: string;
-  task?: {
-    id?: string;
-    _id?: string;
-  };
-  [key: string]: unknown;
-};
-
-function getTaskId(payload: DoorScaleTaskResponse) {
-  return payload.id ?? payload._id ?? payload.task?.id ?? payload.task?._id;
-}
-
 function getDueDateTime(body: CreateTaskBody) {
   return body.dueDateTime || body.dueDate || null;
 }
@@ -66,8 +53,6 @@ function getDueDateTime(body: CreateTaskBody) {
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Task saved locally. DoorScale sync will retry later.";
 }
-
-type TaskSyncStatus = "failed" | "pending_sync" | "synced";
 
 export default async function handler(
   request: VercelRequest,
@@ -146,87 +131,24 @@ export default async function handler(
       "/api/ghl/tasks/create",
     );
 
-    if (connectedAccount.location_id !== transactionRow.location_id) {
-      throw new Error("DoorScale account does not match this transaction.");
-    }
-
-    if (!contactId) {
-      throw new Error("Waiting for CRM contact sync.");
-    }
-
-    const taskPayload = {
+    const result = await syncTaskToDoorScale({
+      accessToken: connectedAccount.access_token,
+      activeLocationId,
       assignedTo: body.assignedTo || undefined,
       contactId,
-      dueDate: dueDateTime || undefined,
-      locationId: connectedAccount.location_id,
-      opportunityId: transactionRow.ghl_opportunity_id || undefined,
-      body: body.description || undefined,
+      description: body.description || undefined,
+      dueDateTime,
+      taskId: body.taskId,
       title: body.title,
-    };
-    const endpoint = `${TASKS_URL_BASE}/${connectedAccount.location_id}/tasks`;
-
-    console.log("DoorScale task create request:", {
-      contactIdExists: Boolean(contactId),
-      endpoint,
-      locationId: connectedAccount.location_id,
-      taskId: body.taskId || null,
-      taskTitle: body.title,
       transactionId: body.transactionId,
+      transactionRow,
     });
 
-    const taskResponse = await fetch(
-      endpoint,
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${connectedAccount.access_token}`,
-          "Content-Type": "application/json",
-          Version: API_VERSION,
-        },
-        body: JSON.stringify(taskPayload),
-      },
-    );
-    const rawBody = await taskResponse.text();
-
-    console.log("DoorScale task create response:", {
-      endpoint,
-      status: taskResponse.status,
-      taskId: body.taskId || null,
-      taskTitle: body.title,
-    });
-
-    if (!taskResponse.ok) {
-      console.error("DoorScale task create failed:", {
-        body: rawBody,
-        status: taskResponse.status,
-      });
-      syncStatus = "failed";
-      throw new Error(rawBody || `DoorScale task create failed with status ${taskResponse.status}.`);
-    }
-
-    const parsedBody = rawBody ? (JSON.parse(rawBody) as DoorScaleTaskResponse) : {};
-    externalTaskId = getTaskId(parsedBody);
-
-    if (!externalTaskId) {
-      syncStatus = "failed";
-      throw new Error("DoorScale task was created but no task ID was returned.");
-    }
-
-    syncStatus = "synced";
-    syncErrorMessage = null;
-    console.log("DoorScale task create result:", {
-      externalTaskId: externalTaskId || null,
-      status: taskResponse.status,
-      taskTitle: body.title,
-    });
+    externalTaskId = result.externalTaskId;
+    syncStatus = result.syncStatus;
+    syncErrorMessage = result.lastSyncError;
   } catch (error) {
-    if (syncStatus === "synced") {
-      syncStatus = "failed";
-    }
-    if (error instanceof Error && error.message === "Waiting for CRM contact sync.") {
-      syncStatus = "pending_sync";
-    }
+    syncStatus = "failed";
     syncErrorMessage = getErrorMessage(error);
     console.error("DoorScale task create write-back failed:", {
       error: syncErrorMessage,

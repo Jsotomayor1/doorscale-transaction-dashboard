@@ -5,7 +5,7 @@ import {
   getRequestedLocationId,
   logRouteDataCounts,
 } from "../_active-location.js";
-import { retryPendingDocumentMirrors } from "../../documents/mirror.js";
+import { PostTransactionSync } from "../post-transaction-sync.js";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
 const CONTACTS_URL = "https://services.leadconnectorhq.com/contacts/";
@@ -845,17 +845,15 @@ export default async function handler(
 
   if (!writeBackFailed && savedTransaction?.id) {
     try {
-      await retryPendingDocumentMirrors({
+      await PostTransactionSync({
         accessToken: connectedAccount.access_token,
         activeLocationId,
-        contactId: contactId ?? savedTransaction.ghl_contact_id ?? savedTransaction.contact_id ?? null,
-        propertyAddress: savedTransaction.property_address ?? body.propertyAddress,
         supabase,
         transactionId: String(savedTransaction.id),
       });
-    } catch (documentMirrorError) {
-      console.error("DoorScale document mirror retry after transaction create failed:", {
-        error: documentMirrorError,
+    } catch (postSyncError) {
+      console.error("DoorScale post transaction sync after create failed:", {
+        error: postSyncError,
         transactionId: savedTransaction.id,
       });
     }

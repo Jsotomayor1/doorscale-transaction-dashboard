@@ -5,7 +5,7 @@ import {
   getRequestedLocationId,
   logRouteDataCounts,
 } from "../_active-location.js";
-import { retryPendingDocumentMirrors } from "../../documents/mirror.js";
+import { PostTransactionSync } from "../post-transaction-sync.js";
 
 const OPPORTUNITIES_URL = "https://services.leadconnectorhq.com/opportunities/";
 const CONTACTS_URL = "https://services.leadconnectorhq.com/contacts/";
@@ -901,17 +901,15 @@ export default async function handler(
 
   if (!writeBackFailed) {
     try {
-      await retryPendingDocumentMirrors({
+      await PostTransactionSync({
         accessToken: connectedAccount.access_token,
         activeLocationId,
-        contactId: contactId ?? updatedTransaction?.ghl_contact_id ?? updatedTransaction?.contact_id ?? null,
-        propertyAddress: updatedTransaction?.property_address ?? transactionRow.property_address,
         supabase,
         transactionId: body.transactionId,
       });
-    } catch (documentMirrorError) {
-      console.error("DoorScale document mirror retry after transaction sync failed:", {
-        error: documentMirrorError,
+    } catch (postSyncError) {
+      console.error("DoorScale post transaction sync after update failed:", {
+        error: postSyncError,
         transactionId: body.transactionId,
       });
     }
