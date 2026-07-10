@@ -2696,36 +2696,41 @@ export function useCrmData() {
         throw new Error(result.message || "Unable to upload document.");
       }
 
-      if (result.document) {
-        setData((currentData) => ({
-          ...currentData,
-          documents: upsertUploadedDocument(
-            currentData.documents,
-            result.document,
-            {
-              documentId,
-              documentType,
-              fileName: file.name,
-              locationId,
-              transactionId,
-            },
-          ),
-        }));
-        notifyDoorScaleDataChanged();
-        return {
-          message: result.message || "Document uploaded.",
-          status: response.status,
-        };
-      }
+      const fallbackDocumentId =
+        documentId ||
+        result.document?.id ||
+        result.document?.document_id ||
+        `local-upload-${transactionId}-${Date.now()}`;
 
-      await refreshData();
-      notifyDoorScaleDataChanged();
+      setData((currentData) => ({
+        ...currentData,
+        documents: upsertUploadedDocument(
+          currentData.documents,
+          result.document ?? {
+            id: fallbackDocumentId,
+            document_name: documentType,
+            document_type: documentType,
+            location_id: locationId,
+            status: "uploaded",
+            transaction_id: transactionId,
+            uploaded_at: new Date().toISOString(),
+          },
+          {
+            documentId: fallbackDocumentId,
+            documentType,
+            fileName: file.name,
+            locationId,
+            transactionId,
+          },
+        ),
+      }));
+
       return {
         message: result.message || "Document uploaded.",
         status: response.status,
       };
     },
-    [activeLocationId, refreshData],
+    [activeLocationId],
   );
 
   const ensureTransactionDocuments = useCallback(
