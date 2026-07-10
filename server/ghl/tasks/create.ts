@@ -47,6 +47,7 @@ type TaskRowPayload = {
 
 type DoorScaleTaskResponse = {
   id?: string;
+  _id?: string;
   task?: {
     id?: string;
     _id?: string;
@@ -55,7 +56,7 @@ type DoorScaleTaskResponse = {
 };
 
 function getTaskId(payload: DoorScaleTaskResponse) {
-  return payload.id ?? payload.task?.id ?? payload.task?._id;
+  return payload.id ?? payload._id ?? payload.task?.id ?? payload.task?._id;
 }
 
 function getDueDateTime(body: CreateTaskBody) {
@@ -65,6 +66,8 @@ function getDueDateTime(body: CreateTaskBody) {
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Task saved locally. DoorScale sync will retry later.";
 }
+
+type TaskSyncStatus = "failed" | "pending_sync" | "synced";
 
 export default async function handler(
   request: VercelRequest,
@@ -133,8 +136,8 @@ export default async function handler(
   };
 
   let externalTaskId: string | undefined;
-  let writeBackFailed = false;
-  let syncErrorMessage = "";
+  let syncStatus: TaskSyncStatus = "pending_sync";
+  let syncErrorMessage: string | null = "Waiting for CRM contact sync.";
 
   try {
     const connectedAccount = await getActiveLocation(
@@ -148,7 +151,7 @@ export default async function handler(
     }
 
     if (!contactId) {
-      throw new Error("Task contact is not synced yet.");
+      throw new Error("Waiting for CRM contact sync.");
     }
 
     const taskPayload = {
@@ -198,17 +201,32 @@ export default async function handler(
         body: rawBody,
         status: taskResponse.status,
       });
-      throw new Error("DoorScale task create failed.");
+      syncStatus = "failed";
+      throw new Error(rawBody || `DoorScale task create failed with status ${taskResponse.status}.`);
     }
 
-    externalTaskId = getTaskId(JSON.parse(rawBody) as DoorScaleTaskResponse);
+    const parsedBody = rawBody ? (JSON.parse(rawBody) as DoorScaleTaskResponse) : {};
+    externalTaskId = getTaskId(parsedBody);
+
+    if (!externalTaskId) {
+      syncStatus = "failed";
+      throw new Error("DoorScale task was created but no task ID was returned.");
+    }
+
+    syncStatus = "synced";
+    syncErrorMessage = null;
     console.log("DoorScale task create result:", {
       externalTaskId: externalTaskId || null,
       status: taskResponse.status,
       taskTitle: body.title,
     });
   } catch (error) {
-    writeBackFailed = true;
+    if (syncStatus === "synced") {
+      syncStatus = "failed";
+    }
+    if (error instanceof Error && error.message === "Waiting for CRM contact sync.") {
+      syncStatus = "pending_sync";
+    }
     syncErrorMessage = getErrorMessage(error);
     console.error("DoorScale task create write-back failed:", {
       error: syncErrorMessage,
@@ -222,9 +240,9 @@ export default async function handler(
   const taskRow = {
     ...localTask,
     ghl_task_id: externalTaskId ?? null,
-    sync_status: writeBackFailed ? "pending_sync" : "synced",
-    last_sync_error: writeBackFailed ? syncErrorMessage : null,
-    last_synced_at: writeBackFailed ? null : new Date().toISOString(),
+    sync_status: syncStatus,
+    last_sync_error: syncErrorMessage,
+    last_synced_at: syncStatus === "synced" ? new Date().toISOString() : null,
   };
   async function saveTask(payload: TaskRowPayload) {
     return body.taskId
@@ -287,10 +305,13 @@ export default async function handler(
   }
 
   response.status(200).json({
-    ok: !writeBackFailed,
-    message: writeBackFailed
-      ? "Task saved locally. DoorScale sync will retry later."
-      : "Task saved.",
+    ok: syncStatus === "synced",
+    message: syncStatus === "synced"
+      ? "Task saved."
+      : syncErrorMessage === "Waiting for CRM contact sync."
+        ? "Task saved locally. Waiting for CRM contact sync."
+        : "Task saved locally. DoorScale sync will retry later.",
+    syncStatus,
     taskId: savedTask?.id,
   });
   logRouteDataCounts("/api/ghl/tasks/create", activeLocationId, {

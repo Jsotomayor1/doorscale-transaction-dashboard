@@ -39,13 +39,11 @@ function buildLocalUpdate(body: UpdateTaskBody) {
   };
 }
 
-function getSyncFields(writeBackFailed: boolean) {
+function getSyncFields(syncStatus: "failed" | "pending_sync" | "synced", syncError: string | null) {
   return {
-    sync_status: writeBackFailed ? "pending_sync" : "synced",
-    last_sync_error: writeBackFailed
-      ? "Task saved locally. DoorScale sync will retry later."
-      : null,
-    last_synced_at: writeBackFailed ? null : new Date().toISOString(),
+    sync_status: syncStatus,
+    last_sync_error: syncError,
+    last_synced_at: syncStatus === "synced" ? new Date().toISOString() : null,
   };
 }
 
@@ -107,7 +105,12 @@ export default async function handler(
   }
 
   const task = currentTask as TaskRow;
-  let writeBackFailed = false;
+  let syncStatus: "failed" | "pending_sync" | "synced" = task.ghl_task_id
+    ? "synced"
+    : "pending_sync";
+  let syncError: string | null = task.ghl_task_id
+    ? null
+    : "Waiting for CRM task sync.";
 
   if (task.ghl_task_id) {
     try {
@@ -141,11 +144,17 @@ export default async function handler(
           body: rawBody,
           status: updateResponse.status,
         });
-        throw new Error("DoorScale task update failed.");
+        throw new Error(rawBody || `DoorScale task update failed with status ${updateResponse.status}.`);
       }
+      syncStatus = "synced";
+      syncError = null;
     } catch (error) {
-      writeBackFailed = true;
-      console.error("DoorScale task update write-back failed:", error);
+      syncStatus = "failed";
+      syncError = error instanceof Error ? error.message : "Task saved locally. DoorScale sync will retry later.";
+      console.error("DoorScale task update write-back failed:", {
+        error: syncError,
+        taskId: body.taskId,
+      });
     }
   }
 
@@ -153,7 +162,7 @@ export default async function handler(
     .from("tasks")
     .update({
       ...buildLocalUpdate(body),
-      ...getSyncFields(writeBackFailed),
+      ...getSyncFields(syncStatus, syncError),
     })
     .eq("id", body.taskId)
     .eq("location_id", activeLocationId);
@@ -165,10 +174,13 @@ export default async function handler(
   }
 
   response.status(200).json({
-    ok: !writeBackFailed,
-    message: writeBackFailed
-      ? "Task saved locally. DoorScale sync will retry later."
-      : "Task saved.",
+    ok: syncStatus === "synced",
+    message: syncStatus === "synced"
+      ? "Task saved."
+      : syncError === "Waiting for CRM task sync."
+        ? "Task saved locally. Waiting for CRM task sync."
+        : "Task saved locally. DoorScale sync will retry later.",
+    syncStatus,
   });
   logRouteDataCounts("/api/ghl/tasks/update", activeLocationId, {
     tasks: 1,

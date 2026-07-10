@@ -1023,6 +1023,57 @@ async function loadTransactionDocuments(
     .order("created_at", { ascending: false });
 }
 
+async function repairFalseSyncedTasks(
+  client: SupabaseClient,
+  activeLocationId: string,
+  tasks: SupabaseTask[],
+) {
+  const falseSyncedTasks = tasks.filter(
+    (task) =>
+      (task.sync_status || "").toLowerCase() === "synced" &&
+      !task.ghl_task_id,
+  );
+
+  if (!falseSyncedTasks.length) return tasks;
+
+  const taskIds = falseSyncedTasks.map((task) => task.id);
+  const repairPayload = {
+    sync_status: "pending_sync",
+    last_sync_error: "Waiting for CRM contact sync.",
+    last_synced_at: null,
+  };
+
+  const { error } = await client
+    .from("tasks")
+    .update(repairPayload)
+    .eq("location_id", activeLocationId)
+    .in("id", taskIds);
+
+  if (error) {
+    console.warn("DoorScale task sync repair failed:", {
+      activeLocationId,
+      error,
+      taskCount: falseSyncedTasks.length,
+    });
+  } else {
+    console.log("DoorScale task sync repair completed:", {
+      activeLocationId,
+      taskCount: falseSyncedTasks.length,
+    });
+  }
+
+  const repairedTaskIds = new Set(taskIds);
+
+  return tasks.map((task) =>
+    repairedTaskIds.has(task.id)
+      ? {
+          ...task,
+          ...repairPayload,
+        }
+      : task,
+  );
+}
+
 async function fetchCrmData(
   client: SupabaseClient,
   activeLocationId: string,
@@ -1074,7 +1125,13 @@ async function fetchCrmData(
   });
 
   const transactions = (transactionsResult.data ?? []) as SupabaseTransaction[];
-  const tasks = tasksResult.error ? [] : (tasksResult.data ?? []);
+  const tasks = tasksResult.error
+    ? []
+    : await repairFalseSyncedTasks(
+        client,
+        activeLocationId,
+        (tasksResult.data ?? []) as SupabaseTask[],
+      );
   let documents = documentsResult.error
     ? []
     : ((documentsResult.data ?? []) as SupabaseTransactionDocument[]);
