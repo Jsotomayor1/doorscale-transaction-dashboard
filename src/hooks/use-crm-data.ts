@@ -1075,6 +1075,21 @@ async function repairFalseSyncedTasks(
   );
 }
 
+async function loadTransactionTasks(
+  client: SupabaseClient,
+  activeLocationId: string,
+  transactionId: string,
+) {
+  return client
+    .from("tasks")
+    .select(
+      "id, location_id, transaction_id, title, due_date, due_datetime, status, assigned_to, sync_status, last_sync_error, last_synced_at, ghl_task_id, created_at",
+    )
+    .eq("location_id", activeLocationId)
+    .eq("transaction_id", transactionId)
+    .order("created_at", { ascending: false });
+}
+
 async function fetchCrmData(
   client: SupabaseClient,
   activeLocationId: string,
@@ -1684,6 +1699,88 @@ export function useCrmData() {
     }
   }, []);
 
+  const refreshTransactionTasksAndDocuments = useCallback(
+    async (
+      client: SupabaseClient,
+      locationId: string,
+      transactionId: string,
+    ) => {
+      const [tasksResult, documentsResult] = await Promise.all([
+        loadTransactionTasks(client, locationId, transactionId),
+        loadTransactionDocuments(client, locationId, transactionId),
+      ]);
+
+      if (tasksResult.error) {
+        throw new Error("Unable to load transaction tasks.");
+      }
+
+      if (documentsResult.error) {
+        throw new Error("Unable to load transaction documents.");
+      }
+
+      const repairedTasks = await repairFalseSyncedTasks(
+        client,
+        locationId,
+        (tasksResult.data ?? []) as SupabaseTask[],
+      );
+      const documents = ((documentsResult.data ?? []) as SupabaseTransactionDocument[])
+        .map(mapSupabaseDocument);
+
+      setData((currentData) => {
+        const transactionById = new Map(
+          currentData.transactions.map((transaction) => [
+            String(transaction.id),
+            transaction,
+          ]),
+        );
+        const mappedTasks = repairedTasks.map((task) => {
+          const taskTransactionId =
+            task.transaction_id === null || task.transaction_id === undefined
+              ? ""
+              : String(task.transaction_id);
+          const transaction = transactionById.get(taskTransactionId);
+
+          return {
+            id: task.id,
+            title: task.title ?? "Untitled task",
+            description: task.description ?? "",
+            dueDate: task.due_date ?? "",
+            dueDateTime: task.due_datetime ?? task.due_date ?? "",
+            assignedTo: task.assigned_to ?? "",
+            status: task.status ?? "pending",
+            relatedOpportunityId: taskTransactionId,
+            transactionId: taskTransactionId,
+            propertyAddress: transaction?.propertyAddress ?? "",
+            clientName: transaction?.clientName ?? "",
+            syncStatus: task.sync_status ?? "synced",
+            lastSyncError: task.last_sync_error ?? "",
+            lastSyncedAt: task.last_synced_at ?? "",
+            ghlTaskId: task.ghl_task_id ?? "",
+          };
+        });
+
+        return {
+          ...currentData,
+          tasks: [
+            ...currentData.tasks.filter(
+              (task) => String(task.transactionId) !== String(transactionId),
+            ),
+            ...mappedTasks,
+          ],
+          documents: [
+            ...currentData.documents.filter(
+              (document) =>
+                String(document.transactionId) !== String(transactionId) ||
+                String(document.locationId) !== String(locationId),
+            ),
+            ...documents,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
   const createTransaction = useCallback(
     async (input: NewTransactionInput) => {
       if (isDemoMode()) {
@@ -1988,13 +2085,16 @@ export function useCrmData() {
         });
       }
 
-      await refreshData();
-      notifyDoorScaleDataChanged();
+      await refreshTransactionTasksAndDocuments(
+        client,
+        locationId,
+        input.transactionId,
+      );
       return result.ok === false
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
         : "Stage updated.";
     },
-    [activeLocationId, refreshData],
+    [activeLocationId, refreshTransactionTasksAndDocuments],
   );
 
   const updateTransactionDetails = useCallback(
