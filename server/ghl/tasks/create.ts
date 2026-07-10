@@ -137,17 +137,29 @@ export default async function handler(
       throw new Error("DoorScale account does not match this transaction.");
     }
 
+    if (!contactId) {
+      throw new Error("Task contact is not synced yet.");
+    }
+
     const taskPayload = {
       assignedTo: body.assignedTo || undefined,
-      contactId: contactId || undefined,
+      contactId,
       dueDate: dueDateTime || undefined,
       opportunityId: transactionRow.ghl_opportunity_id || undefined,
       body: body.description || undefined,
       title: body.title,
     };
+    const endpoint = `${TASKS_URL_BASE}/${connectedAccount.location_id}/tasks`;
+
+    console.log("DoorScale task create request:", {
+      contactIdExists: Boolean(contactId),
+      endpoint,
+      locationId: connectedAccount.location_id,
+      transactionId: body.transactionId,
+    });
 
     const taskResponse = await fetch(
-      `${TASKS_URL_BASE}/${connectedAccount.location_id}/tasks`,
+      endpoint,
       {
         method: "POST",
         headers: {
@@ -161,6 +173,11 @@ export default async function handler(
     );
     const rawBody = await taskResponse.text();
 
+    console.log("DoorScale task create response:", {
+      endpoint,
+      status: taskResponse.status,
+    });
+
     if (!taskResponse.ok) {
       console.error("DoorScale task create failed:", {
         body: rawBody,
@@ -170,6 +187,10 @@ export default async function handler(
     }
 
     externalTaskId = getTaskId(JSON.parse(rawBody) as DoorScaleTaskResponse);
+    console.log("DoorScale task create result:", {
+      externalTaskId: externalTaskId || null,
+      status: taskResponse.status,
+    });
   } catch (error) {
     writeBackFailed = true;
     console.error("DoorScale task create write-back failed:", error);

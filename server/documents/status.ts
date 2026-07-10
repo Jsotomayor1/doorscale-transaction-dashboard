@@ -3,8 +3,11 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getActiveLocation } from "../ghl/_active-location.js";
 
 type StatusBody = {
+  action?: string;
   document_id?: string;
   documentId?: string;
+  document_name?: string;
+  documentName?: string;
   status?: string;
   transaction_id?: string;
   transactionId?: string;
@@ -53,12 +56,13 @@ export default async function handler(
   try {
     const body = (request.body ?? {}) as StatusBody;
     const documentId = (body.document_id || body.documentId || "").trim();
+    const documentName = (body.document_name || body.documentName || "").trim();
     const transactionId = (body.transaction_id || body.transactionId || "").trim();
     const status = normalizeStatus(body.status);
 
-    if (!documentId || !ALLOWED_STATUSES.has(status)) {
+    if (!documentId || (!ALLOWED_STATUSES.has(status) && !documentName)) {
       return response.status(400).json({
-        message: "Document status is missing.",
+        message: "Document update is missing.",
         ok: false,
       });
     }
@@ -74,13 +78,18 @@ export default async function handler(
       action: "updateStatus",
       document_id: documentId,
       routeName: "/api/documents/status",
-      status,
+      status: ALLOWED_STATUSES.has(status) ? status : null,
       transaction_id: transactionId || null,
     });
 
+    const payload = {
+      ...(ALLOWED_STATUSES.has(status) ? { status } : {}),
+      ...(documentName ? { document_name: documentName } : {}),
+    };
+
     let query = supabase
       .from("transaction_documents")
-      .update({ status })
+      .update(payload)
       .eq("id", documentId)
       .eq("location_id", activeLocation.activeLocationId);
 
@@ -102,7 +111,7 @@ export default async function handler(
         transactionId: transactionId || null,
       });
       return response.status(500).json({
-        message: "Unable to update document status.",
+        message: "Unable to update document.",
         ok: false,
       });
     }
@@ -111,7 +120,7 @@ export default async function handler(
       activeLocationId: activeLocation.activeLocationId,
       documentId,
       routeName: "/api/documents/status",
-      status,
+      status: updatedDocument?.status ?? null,
       transactionId: transactionId || null,
       updatedDocumentId: updatedDocument?.id ?? null,
     });
@@ -123,7 +132,7 @@ export default async function handler(
   } catch (error) {
     console.error("DoorScale document status route failed:", error);
     return response.status(500).json({
-      message: "Unable to update document status.",
+      message: "Unable to update document.",
       ok: false,
     });
   }

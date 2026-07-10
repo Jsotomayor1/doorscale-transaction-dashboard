@@ -65,6 +65,12 @@ export type UpdateDocumentStatusInput = {
   transactionId: string;
 };
 
+export type RenameDocumentInput = {
+  documentId: string;
+  documentName: string;
+  transactionId: string;
+};
+
 export type UploadDocumentInput = {
   documentId?: string;
   documentType: string;
@@ -1193,11 +1199,46 @@ async function generateChecklistTasks(
 
   if (!taskRows.length) return;
 
-  const { error: taskInsertError } = await client.from("tasks").insert(taskRows);
+  const { data: insertedTasks, error: taskInsertError } = await client
+    .from("tasks")
+    .insert(taskRows)
+    .select("id, title, due_date, due_datetime, status, assigned_to, transaction_id");
 
   if (taskInsertError) {
     throw new Error("Unable to create checklist tasks.");
   }
+
+  await Promise.allSettled(
+    ((insertedTasks ?? []) as SupabaseTask[]).map((task) =>
+      fetch("/api/ghl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(activeLocationId),
+        },
+        body: JSON.stringify({
+          action: "createTask",
+          active_location_id: activeLocationId,
+          assignedTo: task.assigned_to || "Agent",
+          dueDate: task.due_date || null,
+          dueDateTime: task.due_datetime || null,
+          locationId: activeLocationId,
+          status: task.status || "pending",
+          taskId: task.id,
+          title: task.title || "Untitled task",
+          transactionId,
+        }),
+      }).then(async (response) => {
+        const result = await response.json().catch(() => ({}));
+        console.log("DoorScale generated task sync response:", {
+          ok: response.ok && result?.ok !== false,
+          status: response.status,
+          taskId: task.id,
+          transactionId,
+        });
+      }),
+    ),
+  );
 }
 
 async function generateDocumentChecklist(
@@ -2166,6 +2207,75 @@ export function useCrmData() {
     [activeLocationId, refreshData],
   );
 
+  const renameTransactionDocument = useCallback(
+    async ({ documentId, documentName, transactionId }: RenameDocumentInput) => {
+      const trimmedName = documentName.trim();
+
+      if (!trimmedName) {
+        throw new Error("Document name is required.");
+      }
+
+      if (isDemoMode()) {
+        setData((currentData) => ({
+          ...currentData,
+          documents: currentData.documents.map((document) =>
+            document.id === documentId
+              ? { ...document, documentName: trimmedName }
+              : document,
+          ),
+        }));
+        return { message: "Document renamed.", status: 200 };
+      }
+
+      const locationId = activeLocationId || (await getActiveLocationId());
+
+      if (!locationId) {
+        throw new Error("Open this dashboard from your DoorScale account.");
+      }
+
+      const response = await fetch("/api/documents", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(locationId),
+        },
+        body: JSON.stringify({
+          action: "rename",
+          active_location_id: locationId,
+          document_id: documentId,
+          document_name: trimmedName,
+          transaction_id: transactionId,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as DocumentStatusResponse;
+
+      if (!response.ok || result.ok === false) {
+        throw new Error(result.message || "Unable to rename document.");
+      }
+
+      setData((currentData) => ({
+        ...currentData,
+        documents: currentData.documents.map((document) =>
+          document.id === documentId
+            ? {
+                ...document,
+                documentName:
+                  result.document?.documentName ||
+                  result.document?.document_name ||
+                  trimmedName,
+              }
+            : document,
+        ),
+      }));
+
+      return {
+        message: result.message || "Document renamed.",
+        status: response.status,
+      };
+    },
+    [activeLocationId],
+  );
+
   const uploadTransactionDocument = useCallback(
     async ({ documentId = "", documentType, file, transactionId }: UploadDocumentInput) => {
       if (isDemoMode()) {
@@ -2408,6 +2518,7 @@ export function useCrmData() {
       retryTransactionSync,
       retryTaskSync,
       updateDocumentStatus,
+      renameTransactionDocument,
       uploadTransactionDocument,
       ensureTransactionDocuments,
     };
@@ -2420,6 +2531,7 @@ export function useCrmData() {
     loading,
     markTaskCompleted,
     refreshData,
+    renameTransactionDocument,
     retryTaskSync,
     retryTransactionSync,
     updateDocumentStatus,

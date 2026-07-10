@@ -24,6 +24,7 @@ type TransactionRow = {
   ghl_opportunity_id?: string | null;
   id: string;
   location_id: string;
+  property_address?: string | null;
   stage?: string | null;
   transaction_type?: string | null;
 };
@@ -210,6 +211,84 @@ async function mirrorDocumentToGhlContact(input: {
   };
 }
 
+async function addDocumentNoteToGhlContact(input: {
+  accessToken: string;
+  contactId?: string | null;
+  documentName: string;
+  fileUrl: string;
+  locationId: string;
+  propertyAddress?: string | null;
+  uploadedAt: string;
+}) {
+  if (!input.contactId || !input.fileUrl) {
+    console.log("DoorScale contact document note skipped:", {
+      contactIdExists: Boolean(input.contactId),
+      fileUrlAvailable: Boolean(input.fileUrl),
+      locationId: input.locationId,
+    });
+    return {
+      ok: false,
+      message: !input.contactId ? "Missing contact id." : "Missing file URL.",
+      noteId: "",
+      status: 0,
+    };
+  }
+
+  const endpoint = `${CONTACTS_URL_BASE}/${encodeURIComponent(input.contactId)}/notes`;
+  const body = {
+    body: [
+      `Document uploaded: ${input.documentName}`,
+      input.propertyAddress ? `Transaction: ${input.propertyAddress}` : "",
+      `Uploaded: ${input.uploadedAt}`,
+      `File: ${input.fileUrl}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+
+  console.log("DoorScale contact document note request:", {
+    contactIdExists: Boolean(input.contactId),
+    endpoint,
+    locationId: input.locationId,
+  });
+
+  const noteResponse = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+      Version: API_VERSION,
+    },
+    body: JSON.stringify(body),
+  });
+  const responseBody = await noteResponse.text();
+  let noteId = "";
+
+  try {
+    const parsedBody = JSON.parse(responseBody) as {
+      id?: string;
+      note?: { id?: string; _id?: string };
+    };
+    noteId = parsedBody.id || parsedBody.note?.id || parsedBody.note?._id || "";
+  } catch {
+    noteId = "";
+  }
+
+  console.log("DoorScale contact document note response:", {
+    contactIdExists: Boolean(input.contactId),
+    noteId: noteId || null,
+    status: noteResponse.status,
+  });
+
+  return {
+    ok: noteResponse.ok,
+    message: responseBody || noteResponse.statusText,
+    noteId,
+    status: noteResponse.status,
+  };
+}
+
 export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
@@ -267,7 +346,7 @@ export default async function handler(
 
     const { data: transaction, error: transactionError } = await supabase
       .from("transactions")
-      .select("id, location_id, ghl_contact_id, ghl_opportunity_id, stage, transaction_type")
+      .select("id, location_id, ghl_contact_id, ghl_opportunity_id, property_address, stage, transaction_type")
       .eq("id", transactionId)
       .eq("location_id", activeLocation.activeLocationId)
       .maybeSingle();
@@ -348,6 +427,27 @@ export default async function handler(
 
       documentRow = createdDocumentRow;
       documentId = String(createdDocumentRow.id);
+
+      const { error: optionalManualMetadataError } = await supabase
+        .from("transaction_documents")
+        .update({
+          document_template_id: null,
+          stage: transactionRow.stage ?? null,
+          template_id: null,
+          transaction_type: transactionRow.transaction_type ?? null,
+        })
+        .eq("id", documentId)
+        .eq("transaction_id", transactionId)
+        .eq("location_id", activeLocation.activeLocationId);
+
+      if (optionalManualMetadataError) {
+        console.log("DoorScale manual document optional metadata skipped:", {
+          activeLocationId: activeLocation.activeLocationId,
+          documentId,
+          message: optionalManualMetadataError.message,
+          transactionId,
+        });
+      }
     }
 
     const documentRecord = documentRow as DocumentRow;
@@ -486,6 +586,21 @@ export default async function handler(
 
       mirrorStatus = mirrorResult.ok ? "synced" : "failed";
       mirrorError = mirrorResult.ok ? "" : mirrorResult.message.slice(0, 500);
+
+      const noteResult = await addDocumentNoteToGhlContact({
+        accessToken: activeLocation.access_token,
+        contactId,
+        documentName: documentType,
+        fileUrl,
+        locationId: activeLocation.activeLocationId,
+        propertyAddress: transactionRow.property_address,
+        uploadedAt,
+      });
+
+      if (!noteResult.ok) {
+        mirrorStatus = mirrorStatus === "synced" ? "synced" : "failed";
+        mirrorError = mirrorError || noteResult.message.slice(0, 500);
+      }
     } catch (mirrorException) {
       mirrorStatus = "failed";
       const message =

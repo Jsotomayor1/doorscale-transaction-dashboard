@@ -52,6 +52,7 @@ export default function Documents() {
     ensureTransactionDocuments,
     error,
     loading,
+    renameTransactionDocument,
     transactions,
     updateDocumentStatus,
     uploadTransactionDocument,
@@ -65,6 +66,10 @@ export default function Documents() {
   const [manualDocumentNames, setManualDocumentNames] = useState<
     Record<string, string>
   >({});
+  const [globalDocumentName, setGlobalDocumentName] = useState("");
+  const [globalTransactionId, setGlobalTransactionId] = useState("");
+  const [renamingDocumentIds, setRenamingDocumentIds] = useState<string[]>([]);
+  const [renameValues, setRenameValues] = useState<Record<string, string>>({});
   const checklistKeys = useMemo(
     () =>
       transactions
@@ -208,6 +213,68 @@ export default function Documents() {
     }
   }
 
+  async function handleGlobalManualUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    if (!globalTransactionId) {
+      setDocumentError("Choose a transaction before uploading.");
+      return;
+    }
+
+    const documentType =
+      globalDocumentName.trim() || file.name || "Uploaded Document";
+
+    setDocumentError("");
+    setDocumentMessage("");
+    setUploadingDocumentId("global-manual");
+
+    try {
+      await uploadTransactionDocument({
+        documentType,
+        file,
+        transactionId: globalTransactionId,
+      });
+      setDocumentMessage("Document uploaded.");
+      setGlobalDocumentName("");
+    } catch (uploadError) {
+      setDocumentError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Unable to upload document.",
+      );
+    } finally {
+      setUploadingDocumentId("");
+    }
+  }
+
+  async function handleRenameDocument(document: TransactionDocument) {
+    const documentName = (renameValues[document.id] ?? document.documentName).trim();
+
+    setDocumentError("");
+    setDocumentMessage("");
+
+    try {
+      await renameTransactionDocument({
+        documentId: document.id,
+        documentName,
+        transactionId: document.transactionId,
+      });
+      setDocumentMessage("Document renamed.");
+      setRenamingDocumentIds((currentIds) =>
+        currentIds.filter((id) => id !== document.id),
+      );
+    } catch (renameError) {
+      setDocumentError(
+        renameError instanceof Error
+          ? renameError.message
+          : "Unable to rename document.",
+      );
+    }
+  }
+
   return (
     <div className="dashboard">
       <header className="dashboard__header">
@@ -225,6 +292,49 @@ export default function Documents() {
           ) : null}
         </div>
       </header>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Upload Document</CardTitle>
+            <CardDescription>Add a document to any transaction.</CardDescription>
+          </div>
+          <Upload size={20} />
+        </CardHeader>
+        <CardContent>
+          <div className="manual-document-upload manual-document-upload--wide">
+            <select
+              aria-label="Choose transaction"
+              onChange={(event) => setGlobalTransactionId(event.target.value)}
+              value={globalTransactionId}
+            >
+              <option value="">Choose transaction</option>
+              {transactions.map((transaction) => (
+                <option key={transaction.id} value={transaction.id}>
+                  {transaction.clientName} - {transaction.propertyAddress}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Document name"
+              onChange={(event) => setGlobalDocumentName(event.target.value)}
+              placeholder="Document name or type"
+              value={globalDocumentName}
+            />
+            <label className="button button--secondary document-upload-label">
+              <Upload size={16} />
+              {uploadingDocumentId === "global-manual"
+                ? "Uploading..."
+                : "Upload Document"}
+              <input
+                disabled={uploadingDocumentId === "global-manual"}
+                onChange={(event) => void handleGlobalManualUpload(event)}
+                type="file"
+              />
+            </label>
+          </div>
+        </CardContent>
+      </Card>
 
       <section className="entity-grid" aria-label="Transaction documents">
         {transactions.map((transaction) => {
@@ -249,7 +359,23 @@ export default function Documents() {
                   {transactionDocuments.map((document) => (
                     <div className="document-page-row" key={document.id}>
                       <div className="document-page-row__main">
-                        <span>{document.documentName || document.documentType}</span>
+                        {renamingDocumentIds.includes(document.id) ? (
+                          <input
+                            aria-label="Rename document"
+                            onChange={(event) =>
+                              setRenameValues((currentValues) => ({
+                                ...currentValues,
+                                [document.id]: event.target.value,
+                              }))
+                            }
+                            value={
+                              renameValues[document.id] ??
+                              (document.documentName || document.documentType)
+                            }
+                          />
+                        ) : (
+                          <span>{document.documentName || document.documentType}</span>
+                        )}
                         <small>
                           {document.fileName || "No file uploaded"} ·{" "}
                           {formatUploadDate(document.uploadedAt)}
@@ -283,6 +409,46 @@ export default function Documents() {
                           type="file"
                         />
                       </label>
+                      {renamingDocumentIds.includes(document.id) ? (
+                        <>
+                          <button
+                            className="button button--ghost"
+                            onClick={() => void handleRenameDocument(document)}
+                            type="button"
+                          >
+                            Save Name
+                          </button>
+                          <button
+                            className="button button--ghost"
+                            onClick={() =>
+                              setRenamingDocumentIds((currentIds) =>
+                                currentIds.filter((id) => id !== document.id),
+                              )
+                            }
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="button button--ghost"
+                          onClick={() => {
+                            setRenameValues((currentValues) => ({
+                              ...currentValues,
+                              [document.id]:
+                                document.documentName || document.documentType,
+                            }));
+                            setRenamingDocumentIds((currentIds) => [
+                              ...currentIds,
+                              document.id,
+                            ]);
+                          }}
+                          type="button"
+                        >
+                          Rename
+                        </button>
+                      )}
                     </div>
                   ))}
                   {!transactionDocuments.length ? (

@@ -51,7 +51,7 @@ export default async function handler(
     const body = rawBody ? (JSON.parse(rawBody) as ActionBody) : {};
     (request as VercelRequest & { body: ActionBody }).body = body;
 
-    if (body.action === "updateStatus") {
+    if (body.action === "updateStatus" || body.action === "rename") {
       return statusHandler(request, response);
     }
   }

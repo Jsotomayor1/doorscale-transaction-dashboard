@@ -179,6 +179,8 @@ export default function TransactionDetail() {
   const [detailError, setDetailError] = useState("");
   const [uploadingDocumentId, setUploadingDocumentId] = useState("");
   const [manualDocumentName, setManualDocumentName] = useState("");
+  const [renamingDocumentIds, setRenamingDocumentIds] = useState<string[]>([]);
+  const [renameValues, setRenameValues] = useState<Record<string, string>>({});
   const [isPreparingDocuments, setIsPreparingDocuments] = useState(false);
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
@@ -491,6 +493,31 @@ export default function TransactionDetail() {
       );
     } finally {
       setUploadingDocumentId("");
+    }
+  }
+
+  async function handleRenameDocument(documentRecord: TransactionDocument) {
+    const documentName = (
+      renameValues[documentRecord.id] ?? documentRecord.documentName
+    ).trim();
+
+    setDetailMessage("");
+    setDetailError("");
+
+    try {
+      await data.renameTransactionDocument({
+        documentId: documentRecord.id,
+        documentName,
+        transactionId,
+      });
+      setDetailMessage("Document renamed.");
+      setRenamingDocumentIds((currentIds) =>
+        currentIds.filter((id) => id !== documentRecord.id),
+      );
+    } catch (error) {
+      setDetailError(
+        error instanceof Error ? error.message : "Unable to rename document.",
+      );
     }
   }
 
@@ -961,7 +988,23 @@ export default function TransactionDetail() {
                   <div className="placeholder-row" key={documentType}>
                     <FileText size={16} />
                     <div>
-                      <span>{documentRecord.documentName || documentType}</span>
+                      {renamingDocumentIds.includes(documentRecord.id) ? (
+                        <input
+                          aria-label="Rename document"
+                          onChange={(event) =>
+                            setRenameValues((currentValues) => ({
+                              ...currentValues,
+                              [documentRecord.id]: event.target.value,
+                            }))
+                          }
+                          value={
+                            renameValues[documentRecord.id] ??
+                            (documentRecord.documentName || documentType)
+                          }
+                        />
+                      ) : (
+                        <span>{documentRecord.documentName || documentType}</span>
+                      )}
                       <small>
                         {documentRecord.fileName ||
                           documentRecord.doorScaleFileId ||
@@ -1035,6 +1078,46 @@ export default function TransactionDetail() {
                             ? "Replace File"
                             : "Upload Document"}
                       </button>
+                      {renamingDocumentIds.includes(documentRecord.id) ? (
+                        <>
+                          <button
+                            className="button button--ghost"
+                            onClick={() => void handleRenameDocument(documentRecord)}
+                            type="button"
+                          >
+                            Save Name
+                          </button>
+                          <button
+                            className="button button--ghost"
+                            onClick={() =>
+                              setRenamingDocumentIds((currentIds) =>
+                                currentIds.filter((id) => id !== documentRecord.id),
+                              )
+                            }
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="button button--ghost"
+                          onClick={() => {
+                            setRenameValues((currentValues) => ({
+                              ...currentValues,
+                              [documentRecord.id]:
+                                documentRecord.documentName || documentType,
+                            }));
+                            setRenamingDocumentIds((currentIds) => [
+                              ...currentIds,
+                              documentRecord.id,
+                            ]);
+                          }}
+                          type="button"
+                        >
+                          Rename
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
