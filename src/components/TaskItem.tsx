@@ -89,17 +89,36 @@ export function TaskItem({
   const overdue = isOverdue(task);
 
   async function handleComplete() {
+    console.log("[DoorScale diagnostic] TaskItem complete clicked", {
+      at: new Date().toISOString(),
+      isSaving,
+      taskId: task.id,
+      taskStatus: task.status,
+    });
     setTaskError("");
     setIsSaving(true);
 
     try {
       await onComplete(task.id);
+      console.log("[DoorScale diagnostic] TaskItem complete finished", {
+        at: new Date().toISOString(),
+        taskId: task.id,
+      });
     } catch (error) {
       setTaskError(
         error instanceof Error ? error.message : "Unable to complete task.",
       );
+      console.log("[DoorScale diagnostic] TaskItem complete failed", {
+        at: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+        taskId: task.id,
+      });
     } finally {
       setIsSaving(false);
+      console.log("[DoorScale diagnostic] TaskItem complete loading cleared", {
+        at: new Date().toISOString(),
+        taskId: task.id,
+      });
     }
   }
 

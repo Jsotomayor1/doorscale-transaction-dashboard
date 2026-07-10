@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, subDays } from "date-fns";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -1078,6 +1078,17 @@ async function fetchCrmData(
   client: SupabaseClient,
   activeLocationId: string,
 ): Promise<CrmDataState> {
+  const fetchId = ++crmFetchCount;
+  const fetchStartedAt = performance.now();
+  logDiagnostic("fetchCrmData started", {
+    activeLocationId,
+    fetchId,
+    mode: "parallel base queries, sequential checklist generation",
+  });
+
+  const transactionsQueryStartedAt = performance.now();
+  const tasksQueryStartedAt = performance.now();
+  const documentsQueryStartedAt = performance.now();
   const [transactionsResult, tasksResult, documentsResult] = await Promise.all([
     client
       .from("transactions")
@@ -1095,6 +1106,17 @@ async function fetchCrmData(
       .order("created_at", { ascending: false }),
     loadLocationDocuments(client, activeLocationId),
   ]);
+
+  logDiagnostic("fetchCrmData base queries completed", {
+    activeLocationId,
+    documentsDurationMs: Math.round(performance.now() - documentsQueryStartedAt),
+    documentsReturned: documentsResult.data?.length ?? 0,
+    fetchId,
+    tasksDurationMs: Math.round(performance.now() - tasksQueryStartedAt),
+    tasksReturned: tasksResult.data?.length ?? 0,
+    transactionsDurationMs: Math.round(performance.now() - transactionsQueryStartedAt),
+    transactionsReturned: transactionsResult.data?.length ?? 0,
+  });
 
   if (transactionsResult.error) {
     console.error("DoorScale transaction query failed:", {
@@ -1138,11 +1160,19 @@ async function fetchCrmData(
 
   let createdDocumentRows = false;
   try {
+    const checklistStartedAt = performance.now();
     createdDocumentRows = await ensureDocumentChecklists(
       client,
       activeLocationId,
       transactions,
     );
+    logDiagnostic("fetchCrmData document checklist generation completed", {
+      activeLocationId,
+      createdDocumentRows,
+      durationMs: Math.round(performance.now() - checklistStartedAt),
+      fetchId,
+      transactionCount: transactions.length,
+    });
   } catch (checklistError) {
     console.warn("DoorScale document checklist generation skipped:", {
       activeLocationId,
@@ -1167,6 +1197,12 @@ async function fetchCrmData(
     }
   }
 
+  logDiagnostic("fetchCrmData completed", {
+    activeLocationId,
+    durationMs: Math.round(performance.now() - fetchStartedAt),
+    fetchId,
+  });
+
   return mapSupabaseData(
     transactions,
     tasks,
@@ -1181,6 +1217,14 @@ async function generateChecklistTasks(
   transactionType: string,
   stage: TransactionStage,
 ) {
+  const startedAt = performance.now();
+  logDiagnostic("task checklist generation started", {
+    activeLocationId,
+    stage,
+    transactionId,
+    transactionType,
+  });
+
   const { data: templates, error: templateError } = await client
     .from("task_templates")
     .select("id, location_id, transaction_type, stage, title, days_offset, assigned_role, sort_order")
@@ -1212,6 +1256,17 @@ async function generateChecklistTasks(
       : matchingTemplates.filter((template) =>
           ["demo-location", "global", ""].includes(template.location_id ?? ""),
         );
+
+  logDiagnostic("task checklist templates evaluated", {
+    activeLocationId,
+    durationMs: Math.round(performance.now() - startedAt),
+    matchingTemplates: matchingTemplates.length,
+    selectedTemplates: taskTemplates.length,
+    stage,
+    templatesReturned: templateRows.length,
+    transactionId,
+    transactionType,
+  });
 
   if (!taskTemplates.length) return;
 
@@ -1296,6 +1351,15 @@ async function generateChecklistTasks(
       }),
     ),
   );
+
+  logDiagnostic("task checklist generation completed", {
+    activeLocationId,
+    durationMs: Math.round(performance.now() - startedAt),
+    insertedTasks: insertedTasks?.length ?? 0,
+    stage,
+    transactionId,
+    transactionType,
+  });
 }
 
 async function generateDocumentChecklist(
@@ -1305,10 +1369,21 @@ async function generateDocumentChecklist(
   transactionType: string,
   stage: string,
 ) {
+  const startedAt = performance.now();
   const normalizedTransactionType = normalizeTemplateKey(transactionType);
   const normalizedStage = normalizeTemplateKey(stage);
   const templateLocationFilter =
     `location_id.eq.${activeLocationId},location_id.eq.global,location_id.eq.demo-location,location_id.is.null`;
+
+  logDiagnostic("document checklist generation started", {
+    activeLocationId,
+    normalizedStage,
+    normalizedTransactionType,
+    stage,
+    templateLocationFilter,
+    transactionId,
+    transactionType,
+  });
 
   const { data: templates, error: templateError } = await client
     .from("document_templates")
@@ -1345,6 +1420,19 @@ async function generateDocumentChecklist(
       : matchingTemplates.filter((template) =>
           ["global", "demo-location", ""].includes(template.location_id ?? ""),
         );
+
+  logDiagnostic("document checklist templates evaluated", {
+    activeLocationId,
+    durationMs: Math.round(performance.now() - startedAt),
+    matchingTemplates: matchingTemplates.length,
+    normalizedStage,
+    normalizedTransactionType,
+    selectedTemplates: documentTemplates.length,
+    stage,
+    templatesReturned: templateRows.length,
+    transactionId,
+    transactionType,
+  });
 
   if (!documentTemplates.length) return false;
 
@@ -1392,6 +1480,15 @@ async function generateDocumentChecklist(
     throw new Error("Unable to create document checklist.");
   }
 
+  logDiagnostic("document checklist generation completed", {
+    activeLocationId,
+    durationMs: Math.round(performance.now() - startedAt),
+    insertedDocuments: documentRows.length,
+    stage,
+    transactionId,
+    transactionType,
+  });
+
   return true;
 }
 
@@ -1421,6 +1518,17 @@ const emptyData: CrmDataState = {
   tasks: [],
   documents: [],
 };
+
+let crmRefreshCount = 0;
+let crmFetchCount = 0;
+let taskCompletionRequestCount = 0;
+
+function logDiagnostic(label: string, details: Record<string, unknown> = {}) {
+  console.log(`[DoorScale diagnostic] ${label}`, {
+    at: new Date().toISOString(),
+    ...details,
+  });
+}
 
 function getDueDateTime(dueDate: string, dueTime: string) {
   if (dueDate && dueTime) {
@@ -1493,12 +1601,33 @@ export function useCrmData() {
   const [loading, setLoading] = useState(!isDemoMode());
   const [error, setError] = useState<string | null>(null);
   const [activeLocationId, setActiveLocationId] = useState("");
+  const renderCount = useRef(0);
+  renderCount.current += 1;
+  logDiagnostic("useCrmData render", {
+    activeLocationId,
+    documents: data.documents.length,
+    loading,
+    renderCount: renderCount.current,
+    tasks: data.tasks.length,
+    transactions: data.transactions.length,
+  });
 
   const refreshData = useCallback(async () => {
+    const refreshId = ++crmRefreshCount;
+    const refreshStartedAt = performance.now();
+    logDiagnostic("refreshData started", {
+      refreshId,
+    });
+
     if (isDemoMode()) {
       setData(mapDemoData());
       setLoading(false);
       setError(null);
+      logDiagnostic("refreshData completed", {
+        durationMs: Math.round(performance.now() - refreshStartedAt),
+        mode: "demo",
+        refreshId,
+      });
       return;
     }
 
@@ -1507,6 +1636,11 @@ export function useCrmData() {
     if (!client) {
       setLoading(false);
       setError("DoorScale connection is not configured.");
+      logDiagnostic("refreshData cleared loading", {
+        durationMs: Math.round(performance.now() - refreshStartedAt),
+        reason: "missing client",
+        refreshId,
+      });
       return;
     }
 
@@ -1519,16 +1653,33 @@ export function useCrmData() {
       if (!locationId) {
         setData(emptyData);
         setError("Connect DoorScale to load transaction data.");
+        logDiagnostic("refreshData completed", {
+          durationMs: Math.round(performance.now() - refreshStartedAt),
+          reason: "missing active location",
+          refreshId,
+        });
         return;
       }
 
       setActiveLocationId(locationId);
-      setData(await fetchCrmData(client, locationId));
+      const refreshedData = await fetchCrmData(client, locationId);
+      setData(refreshedData);
+      logDiagnostic("refreshData state updated", {
+        documents: refreshedData.documents.length,
+        durationMs: Math.round(performance.now() - refreshStartedAt),
+        refreshId,
+        tasks: refreshedData.tasks.length,
+        transactions: refreshedData.transactions.length,
+      });
     } catch (crmError) {
       console.error("DoorScale transaction data load failed:", crmError);
       setError("Unable to load transaction data.");
     } finally {
       setLoading(false);
+      logDiagnostic("refreshData loading state cleared", {
+        durationMs: Math.round(performance.now() - refreshStartedAt),
+        refreshId,
+      });
     }
   }, []);
 
@@ -1951,6 +2102,13 @@ export function useCrmData() {
 
   const markTaskCompleted = useCallback(
     async (taskId: string) => {
+      const requestId = ++taskCompletionRequestCount;
+      const startedAt = performance.now();
+      logDiagnostic("task completion handler started", {
+        requestId,
+        taskId,
+      });
+
       if (isDemoMode()) {
         setData((currentData) => ({
           ...currentData,
@@ -1958,6 +2116,11 @@ export function useCrmData() {
             task.id === taskId ? { ...task, status: "completed" } : task,
           ),
         }));
+        logDiagnostic("task completion state updated", {
+          mode: "demo",
+          requestId,
+          taskId,
+        });
         return;
       }
 
@@ -1967,7 +2130,14 @@ export function useCrmData() {
         throw new Error("Connect DoorScale to save task data.");
       }
 
-      const response = await fetch("/api/ghl", {
+      logDiagnostic("task completion request sent", {
+        endpoint: "/api/ghl",
+        locationId,
+        requestId,
+        taskId,
+      });
+
+      const response = await fetchWithTimeout("/api/ghl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1980,16 +2150,37 @@ export function useCrmData() {
           status: "completed",
           taskId,
         }),
+      }, 30000);
+
+      logDiagnostic("task completion response received", {
+        durationMs: Math.round(performance.now() - startedAt),
+        requestId,
+        responseStatus: response.status,
+        taskId,
       });
       const result = await parseTaskWriteResponse(response);
 
+      logDiagnostic("task completion refetch started", {
+        requestId,
+        taskId,
+      });
       await refreshData();
+      logDiagnostic("task completion refetch completed", {
+        durationMs: Math.round(performance.now() - startedAt),
+        requestId,
+        taskId,
+      });
 
       if (result.ok === false) {
         throw new Error(
           result.message || "Task saved locally. DoorScale sync will retry later.",
         );
       }
+      logDiagnostic("task completion handler completed", {
+        durationMs: Math.round(performance.now() - startedAt),
+        requestId,
+        taskId,
+      });
     },
     [activeLocationId, refreshData],
   );

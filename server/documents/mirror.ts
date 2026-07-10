@@ -81,6 +81,7 @@ async function mirrorDocumentToGhlContact(input: {
   const responseBody = await mirrorResponse.text();
 
   console.log("DoorScale contact document retry mirror response:", {
+    body: responseBody,
     contactIdExists: Boolean(input.contactId),
     documentId: input.documentId,
     status: mirrorResponse.status,
@@ -131,15 +132,29 @@ async function addDocumentNoteToGhlContact(input: {
     body: JSON.stringify(body),
   });
   const responseBody = await noteResponse.text();
+  let noteId = "";
+
+  try {
+    const parsedBody = JSON.parse(responseBody) as {
+      id?: string;
+      note?: { id?: string; _id?: string };
+    };
+    noteId = parsedBody.id || parsedBody.note?.id || parsedBody.note?._id || "";
+  } catch {
+    noteId = "";
+  }
 
   console.log("DoorScale contact document retry note response:", {
+    body: responseBody,
     contactIdExists: Boolean(input.contactId),
+    noteId: noteId || null,
     status: noteResponse.status,
   });
 
   return {
     ok: noteResponse.ok,
     message: responseBody || noteResponse.statusText,
+    noteId,
     status: noteResponse.status,
   };
 }
@@ -279,6 +294,16 @@ export async function retryPendingDocumentMirrors(input: {
       })
       .eq("id", document.id)
       .eq("location_id", activeLocationId);
+
+    console.log("DoorScale document mirror retry final state:", {
+      documentId: document.id,
+      finalMirrorError: isSynced
+        ? null
+        : (mirrorResult.message || noteResult.message || "Document mirror pending.").slice(0, 500),
+      finalMirrorStatus: isSynced ? "synced" : "pending",
+      noteId: noteResult.noteId || null,
+      transactionId,
+    });
 
     if (isSynced) synced += 1;
   }

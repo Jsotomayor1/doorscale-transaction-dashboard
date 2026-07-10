@@ -59,6 +59,10 @@ function buildDoorScaleUpdate(body: UpdateTaskBody, task: TaskRow) {
   };
 }
 
+function definedKeys(value: Record<string, unknown>) {
+  return Object.keys(value).filter((key) => value[key] !== undefined);
+}
+
 export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
@@ -82,6 +86,12 @@ export default async function handler(
   const body = request.body as UpdateTaskBody;
 
   const activeLocationId = getRequestedLocationId(request);
+
+  console.log("DoorScale task update route started:", {
+    activeLocationId: activeLocationId || null,
+    requestKeys: Object.keys(body),
+    taskId: body.taskId || null,
+  });
 
   if (!body.taskId || !activeLocationId) {
     response.status(400).json({ ok: false, message: "Task details are missing." });
@@ -124,8 +134,17 @@ export default async function handler(
         throw new Error("DoorScale account does not match this task.");
       }
 
+      const endpoint = `${TASKS_URL_BASE}/${connectedAccount.location_id}/tasks/${task.ghl_task_id}`;
+      const updatePayload = buildDoorScaleUpdate(body, task);
+
+      console.log("DoorScale task update GHL request:", {
+        endpoint,
+        payloadKeys: definedKeys(updatePayload),
+        taskId: body.taskId,
+      });
+
       const updateResponse = await fetch(
-        `${TASKS_URL_BASE}/${connectedAccount.location_id}/tasks/${task.ghl_task_id}`,
+        endpoint,
         {
           method: "PUT",
           headers: {
@@ -134,10 +153,17 @@ export default async function handler(
             "Content-Type": "application/json",
             Version: API_VERSION,
           },
-          body: JSON.stringify(buildDoorScaleUpdate(body, task)),
+          body: JSON.stringify(updatePayload),
         },
       );
       const rawBody = await updateResponse.text();
+
+      console.log("DoorScale task update GHL response:", {
+        body: rawBody,
+        endpoint,
+        status: updateResponse.status,
+        taskId: body.taskId,
+      });
 
       if (!updateResponse.ok) {
         console.error("DoorScale task update failed:", {
@@ -181,6 +207,12 @@ export default async function handler(
         ? "Task saved locally. Waiting for CRM task sync."
         : "Task saved locally. DoorScale sync will retry later.",
     syncStatus,
+  });
+  console.log("DoorScale task update final state:", {
+    finalSyncStatus: syncStatus,
+    ghlTaskId: task.ghl_task_id || null,
+    lastSyncError: syncError,
+    taskId: body.taskId,
   });
   logRouteDataCounts("/api/ghl/tasks/update", activeLocationId, {
     tasks: 1,

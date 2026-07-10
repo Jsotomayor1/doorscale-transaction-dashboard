@@ -277,6 +277,7 @@ async function addDocumentNoteToGhlContact(input: {
   }
 
   console.log("DoorScale contact document note response:", {
+    body: responseBody,
     contactIdExists: Boolean(input.contactId),
     noteId: noteId || null,
     status: noteResponse.status,
@@ -656,6 +657,13 @@ export default async function handler(
         transactionId,
       });
     }
+
+    console.log("DoorScale document upload mirror final state:", {
+      documentId,
+      finalMirrorError: mirrorError || null,
+      finalMirrorStatus: mirrorStatus,
+      transactionId,
+    });
 
     console.log("DoorScale document upload completed:", {
       activeLocationId: activeLocation.activeLocationId,
