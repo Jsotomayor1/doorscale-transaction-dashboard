@@ -9,3 +9,4 @@ public/src
 !.env.local.example
 .env.*.local
 *.tsbuildinfo
+.script-check
