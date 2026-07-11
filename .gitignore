@@ -5,5 +5,7 @@ git-meta
 public/src
 .env
 .env.local
+.env.*
+!.env.local.example
 .env.*.local
 *.tsbuildinfo

@@ -2395,3 +2395,41 @@
     grid-template-columns: 1fr;
   }
 }
+
+.transaction-team-list {
+  display: grid;
+  gap: 12px;
+}
+
+.association-group,
+.association-linked-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.association-group h4,
+.association-linked-card h4 {
+  margin: 0;
+  color: var(--ds-muted, #64748b);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.association-linked-card {
+  padding: 12px;
+  border: 1px solid var(--ds-border, #e2e8f0);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.association-linked-card strong,
+.association-linked-card small {
+  overflow-wrap: anywhere;
+}
+
+.association-linked-card small {
+  color: var(--ds-muted, #64748b);
+}

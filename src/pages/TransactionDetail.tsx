@@ -30,6 +30,7 @@ import {
   useCRMData,
 } from "@/hooks/use-crm-data";
 import {
+  getDoorScaleLocationHeaders,
   getStoredActiveLocationId,
   getUrlActiveLocationId,
 } from "@/lib/active-location";
@@ -46,6 +47,28 @@ const WORKSPACE_STAGES = [
 ] as const;
 
 type WorkspaceTab = "tasks" | "documents" | "notes";
+type TransactionAssociation = {
+  id: string;
+  associationLabel: string;
+  company: string;
+  email: string;
+  name: string;
+  openUrl: string;
+  phone: string;
+  role: string;
+  type: "contact" | "company" | "property" | "unknown";
+};
+
+type TransactionAssociationsResponse = {
+  associations?: TransactionAssociation[];
+  contactsByLabel?: Record<string, TransactionAssociation[]>;
+  linkedOrganization?: TransactionAssociation | null;
+  linkedProperty?: TransactionAssociation | null;
+  objectKey?: string;
+  objectRecordId?: string;
+  ok?: boolean;
+  message?: string;
+};
 
 const initialTaskForm = {
   assignedTo: "",
@@ -203,6 +226,9 @@ export default function TransactionDetail() {
   const [isLoadingNotes, setIsLoadingNotes] = useState(false);
   const [notesLoadedFor, setNotesLoadedFor] = useState("");
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("tasks");
+  const [transactionAssociations, setTransactionAssociations] =
+    useState<TransactionAssociationsResponse>({});
+  const [isLoadingAssociations, setIsLoadingAssociations] = useState(false);
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -332,6 +358,72 @@ export default function TransactionDetail() {
       setIsSavingNote(false);
     }
   }
+
+  useEffect(() => {
+    if (
+      data.loading ||
+      data.error ||
+      !transaction ||
+      !maybeTransactionId ||
+      !maybeActiveLocationId
+    ) {
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingAssociations(true);
+
+    fetch("/api/ghl", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getDoorScaleLocationHeaders(maybeActiveLocationId),
+      },
+      body: JSON.stringify({
+        action: "fetchTransactionAssociations",
+        active_location_id: maybeActiveLocationId,
+        locationId: maybeActiveLocationId,
+        transactionId: maybeTransactionId,
+      }),
+    })
+      .then(async (response) => {
+        const result = (await response.json().catch(() => ({}))) as TransactionAssociationsResponse;
+        if (!response.ok) {
+          throw new Error(result.message || "Unable to load transaction team.");
+        }
+        console.log("DoorScale transaction associations loaded:", {
+          associationLabels: Object.keys(result.contactsByLabel || {}),
+          contactCount: Object.values(result.contactsByLabel || {}).flat().length,
+          hasLinkedOrganization: Boolean(result.linkedOrganization),
+          hasLinkedProperty: Boolean(result.linkedProperty),
+          objectRecordId: result.objectRecordId || null,
+        });
+        if (isMounted) {
+          setTransactionAssociations(result);
+        }
+      })
+      .catch((error) => {
+        console.warn("DoorScale transaction associations unavailable:", error);
+        if (isMounted) {
+          setTransactionAssociations({});
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingAssociations(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    data.error,
+    data.loading,
+    maybeActiveLocationId,
+    maybeTransactionId,
+    transaction,
+  ]);
   if (data.loading) {
     return (
       <div className="dashboard">
@@ -630,6 +722,11 @@ export default function TransactionDetail() {
           ? "Buyer / Seller"
           : "Seller";
   const propertyAddress = fields.propertyAddress || transaction.name || "Property not set";
+  const associatedContactsByLabel: Record<string, TransactionAssociation[]> =
+    transactionAssociations.contactsByLabel || {};
+  const associatedContactCount = Object.values(associatedContactsByLabel).flat().length;
+  const linkedOrganization = transactionAssociations.linkedOrganization;
+  const linkedProperty = transactionAssociations.linkedProperty;
 
   return (
     <div className="dashboard transaction-workspace transaction-workspace--redesigned">
@@ -668,7 +765,7 @@ export default function TransactionDetail() {
       <section className="transaction-workspace-layout">
         <div className="transaction-workspace-layout__left">
           <Card><CardHeader><div><CardTitle>Key Dates</CardTitle><CardDescription>Inspection and closing timeline.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Inspection Date</dt><dd>{formatDate(fields.inspectionDeadline)}</dd></div><div><dt>Closing Date</dt><dd><CalendarClock size={15} />{formatDate(fields.closingDate)}</dd></div><div><dt>Days Until Closing</dt><dd>{getDaysUntilClosing(fields.closingDate)}</dd></div></dl></CardContent></Card>
-          <Card><CardHeader><div><CardTitle>Transaction Team</CardTitle><CardDescription>Primary CRM contact for this transaction.</CardDescription></div></CardHeader><CardContent><div className="team-contact-card"><div><strong>{primaryContactName}</strong><span>{primaryContactRole}</span>{fields.contactEmail ? <small>{fields.contactEmail}</small> : null}{fields.contactPhone ? <small>{fields.contactPhone}</small> : null}</div>{contactLink ? <a className="button button--secondary" href={contactLink} rel="noreferrer" target="_blank">Open Contact</a> : null}</div><Button disabled variant="ghost">Add Contact - Coming next</Button></CardContent></Card>
+          <Card><CardHeader><div><CardTitle>Transaction Team</CardTitle><CardDescription>Contacts associated with the CRM Transaction record.</CardDescription></div></CardHeader><CardContent><div className="transaction-team-list">{isLoadingAssociations ? <p className="empty-state">Loading transaction team...</p> : null}{associatedContactCount ? (Object.entries(associatedContactsByLabel) as Array<[string, TransactionAssociation[]]>).map(([label, contacts]) => <section className="association-group" key={label}><h4>{label}</h4>{contacts.map((contact) => <article className="team-contact-card" key={`${label}-${contact.id || contact.name}`}><div><strong>{contact.name}</strong><span>{contact.role || label}</span>{contact.company ? <small>{contact.company}</small> : null}{contact.email ? <small>{contact.email}</small> : null}{contact.phone ? <small>{contact.phone}</small> : null}</div>{contact.openUrl ? <a className="button button--secondary" href={contact.openUrl} rel="noreferrer" target="_blank">Open Contact</a> : null}</article>)}</section>) : <div className="team-contact-card"><div><strong>{primaryContactName}</strong><span>{primaryContactRole}</span>{fields.contactEmail ? <small>{fields.contactEmail}</small> : null}{fields.contactPhone ? <small>{fields.contactPhone}</small> : null}</div>{contactLink ? <a className="button button--secondary" href={contactLink} rel="noreferrer" target="_blank">Open Contact</a> : null}</div>}{linkedOrganization ? <section className="association-linked-card"><h4>Linked Organization</h4><strong>{linkedOrganization.name}</strong>{linkedOrganization.email ? <small>{linkedOrganization.email}</small> : null}{linkedOrganization.phone ? <small>{linkedOrganization.phone}</small> : null}</section> : null}{linkedProperty ? <section className="association-linked-card"><h4>Property</h4><strong>{linkedProperty.name}</strong>{linkedProperty.company ? <small>{linkedProperty.company}</small> : null}</section> : null}</div><Button disabled variant="ghost">Add Contact - Coming next</Button></CardContent></Card>
           <Card><CardHeader><div><CardTitle>Financial Summary</CardTitle><CardDescription>Projected transaction value.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Commission</dt><dd>{formatCurrency(transaction.value)}</dd></div><div><dt>Status</dt><dd>{transaction.status || "Not set"}</dd></div><div><dt>Assigned Agent</dt><dd>{fields.assignedAgent || "Not assigned"}</dd></div></dl></CardContent></Card>
           {propertyAddress !== "Property not set" ? <Card><CardHeader><div><CardTitle>Property Details</CardTitle><CardDescription>Transaction property information.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Address</dt><dd>{propertyAddress}</dd></div><div><dt>Transaction Type</dt><dd>{fields.transactionType || "Not set"}</dd></div></dl></CardContent></Card> : null}
         </div>
@@ -681,3 +778,7 @@ export default function TransactionDetail() {
     </div>
   );
 }
+
+
+
+

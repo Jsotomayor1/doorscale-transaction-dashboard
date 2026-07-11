@@ -5,6 +5,7 @@ import notesHandler from "../../server/ghl/notes.js";
 import selectLocationHandler from "../../server/ghl/select-location.js";
 import statusHandler from "../../server/ghl/status.js";
 import syncHandler from "../../server/ghl/sync.js";
+import transactionAssociationsHandler from "../../server/ghl/transaction-associations.js";
 import createTaskHandler from "../../server/ghl/tasks/create.js";
 import updateTaskHandler from "../../server/ghl/tasks/update.js";
 import createTransactionHandler from "../../server/ghl/transactions/create.js";
@@ -47,6 +48,8 @@ export default async function handler(
       return statusHandler(request, response);
     case "sync":
       return syncHandler(request, response);
+    case "fetchTransactionAssociations":
+      return transactionAssociationsHandler(request, response);
     case "updateTask":
       return updateTaskHandler(request, response);
     case "updateTransaction":
@@ -58,5 +61,6 @@ export default async function handler(
       });
   }
 }
+
 
 
