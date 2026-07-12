@@ -1,4 +1,4 @@
-﻿import type { VercelRequest, VercelResponse } from "@vercel/node";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import locationsHandler from "../../server/ghl/locations.js";
 import privateConnectHandler from "../../server/ghl/private-connect.js";
 import notesHandler from "../../server/ghl/notes.js";
@@ -48,7 +48,10 @@ export default async function handler(
       return statusHandler(request, response);
     case "sync":
       return syncHandler(request, response);
+    case "addTransactionTeamContact":
     case "fetchTransactionAssociations":
+    case "removeTransactionTeamAssociation":
+    case "searchTransactionTeamContacts":
       return transactionAssociationsHandler(request, response);
     case "updateTask":
       return updateTaskHandler(request, response);
@@ -61,6 +64,7 @@ export default async function handler(
       });
   }
 }
+
 
 
 

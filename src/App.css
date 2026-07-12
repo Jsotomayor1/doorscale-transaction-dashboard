@@ -2307,6 +2307,19 @@
   background: #f8fafc;
 }
 
+button.team-contact-card {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.team-contact-card.is-selected {
+  border-color: var(--ds-blue, #2563eb);
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
+}
+
 .team-contact-card > div {
   display: grid;
   gap: 4px;
@@ -2390,6 +2403,10 @@
     width: 100%;
   }
 
+  .transaction-team-search {
+    grid-template-columns: 1fr;
+  }
+
   .stage-timeline,
   .workspace-tabs {
     grid-template-columns: 1fr;
@@ -2399,6 +2416,24 @@
 .transaction-team-list {
   display: grid;
   gap: 12px;
+}
+
+.transaction-team-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.transaction-team-results {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.team-contact-card .document-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .association-group,

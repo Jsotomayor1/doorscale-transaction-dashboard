@@ -37,11 +37,23 @@ const CONTACT_LABELS = [
 const associationDefinitionCache = new Map<string, AssociationDefinition>();
 const roleAssociationIdCache = new Map<string, Record<string, string>>();
 
+type ContactSearchResult = {
+  email: string;
+  id: string;
+  name: string;
+  phone: string;
+};
+
 type AssociationsBody = {
   action?: string;
   active_location_id?: string;
   locationId?: string;
   transactionId?: string;
+  teamAction?: "addContactAssociation" | "fetchAssociations" | "removeAssociation" | "searchContacts";
+  query?: string;
+  roleKey?: string;
+  contactId?: string;
+  relationId?: string;
 };
 
 type TransactionRow = {
@@ -76,6 +88,7 @@ type NormalizedAssociation = {
   phone: string;
   role: string;
   type: "contact" | "company" | "property" | "unknown";
+  relationId?: string;
 };
 
 function normalizeLabel(label = "") {
@@ -186,11 +199,40 @@ function extractArray(payload: unknown, keys: string[]) {
   return [];
 }
 
+function collectAssociationDefinitions(payload: unknown) {
+  const definitions: AssociationDefinition[] = [];
+  const seen = new Set<unknown>();
+
+  function visit(value: unknown) {
+    if (!value || typeof value !== "object" || seen.has(value)) return;
+
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+
+    const record = value as LooseRecord;
+    const key = normalizeAssociationKey(record.key || "");
+    const id = String(record.id || "");
+
+    if (id && key && ROLE_LABEL_BY_ASSOCIATION_KEY[key]) {
+      definitions.push(record as AssociationDefinition);
+    }
+
+    Object.values(record).forEach(visit);
+  }
+
+  visit(payload);
+  return definitions;
+}
+
 async function ghlRequest(input: {
   accessToken: string;
   body?: unknown;
   endpoint: string;
-  method: "GET" | "POST";
+  method: "DELETE" | "GET" | "POST";
 }) {
   const response = await fetch(`${API_BASE}${input.endpoint}`, {
     method: input.method,
@@ -301,6 +343,36 @@ function cacheResolvedAssociationId(locationId: string, definition: AssociationD
   });
 }
 
+async function fetchTransactionAssociationDefinitions(input: {
+  accessToken: string;
+  locationId: string;
+}) {
+  const result = await ghlRequest({
+    accessToken: input.accessToken,
+    endpoint: `/objects/${encodeURIComponent(TRANSACTION_OBJECT_KEY)}?locationId=${encodeURIComponent(input.locationId)}&fetchProperties=true`,
+    method: "GET",
+  });
+
+  if (!result.response.ok) {
+    console.warn("DoorScale transaction association schema unavailable:", {
+      locationId: input.locationId,
+      status: result.response.status,
+    });
+    return [];
+  }
+
+  const definitions = collectAssociationDefinitions(result.json);
+  definitions.forEach((definition) => cacheResolvedAssociationId(input.locationId, definition));
+
+  console.log("DoorScale transaction association roles discovered:", {
+    endpoint: "/objects/custom_objects.transactions?locationId={locationId}&fetchProperties=true",
+    locationId: input.locationId,
+    roleKeys: Object.keys(roleAssociationIdCache.get(input.locationId) || {}),
+  });
+
+  return definitions;
+}
+
 async function buildAssociationDefinitions(input: {
   accessToken: string;
   locationId: string;
@@ -401,6 +473,7 @@ function normalizeHydratedAssociation(input: {
 
   return {
     associationId: String(input.relation.associationId || ""),
+    relationId: String(input.relation.id || input.relation.relationId || ""),
     associationKey: normalizeAssociationKey(input.definition?.key || ""),
     associationLabel: label,
     company: type === "company" ? "" : input.entity.company || input.entity.companyName || properties.company || "",
@@ -416,6 +489,121 @@ function normalizeHydratedAssociation(input: {
   };
 }
 
+function getContactsFromPayload(payload: unknown) {
+  return extractArray(payload, ["contacts", "items", "data"]);
+}
+
+function normalizeContactSearchResult(contact: LooseRecord): ContactSearchResult {
+  const id = getId(contact);
+
+  return {
+    email: contact.email || "",
+    id,
+    name: getName(contact),
+    phone: contact.phone || "",
+  };
+}
+
+async function searchContacts(input: {
+  accessToken: string;
+  locationId: string;
+  query: string;
+}) {
+  const result = await ghlRequest({
+    accessToken: input.accessToken,
+    body: {
+      locationId: input.locationId,
+      page: 1,
+      pageLimit: 10,
+      query: input.query,
+    },
+    endpoint: "/contacts/search",
+    method: "POST",
+  });
+  const contacts = getContactsFromPayload(result.json).map(normalizeContactSearchResult);
+
+  console.log("DoorScale transaction team contact search:", {
+    count: contacts.length,
+    queryLength: input.query.length,
+    status: result.response.status,
+  });
+
+  return contacts;
+}
+
+function findDuplicateContactRole(input: {
+  contactId: string;
+  roleKey: string;
+  associations: NormalizedAssociation[];
+}) {
+  return input.associations.find(
+    (association) =>
+      association.type === "contact" &&
+      association.id === input.contactId &&
+      association.associationKey === input.roleKey,
+  );
+}
+
+function getCachedAssociationId(locationId: string, roleKey: string) {
+  return roleAssociationIdCache.get(locationId)?.[roleKey] || "";
+}
+
+async function createContactAssociation(input: {
+  accessToken: string;
+  associationId: string;
+  contactId: string;
+  locationId: string;
+  transactionRecordId: string;
+}) {
+  const payload = {
+    associationId: input.associationId,
+    firstRecordId: input.contactId,
+    locationId: input.locationId,
+    secondRecordId: input.transactionRecordId,
+  };
+  const result = await ghlRequest({
+    accessToken: input.accessToken,
+    body: payload,
+    endpoint: "/associations/relations",
+    method: "POST",
+  });
+
+  console.log("DoorScale transaction team association create:", {
+    associationId: input.associationId,
+    contactId: input.contactId,
+    status: result.response.status,
+    transactionRecordId: input.transactionRecordId,
+  });
+
+  if (!result.response.ok) {
+    throw new Error("Unable to add contact to transaction team.");
+  }
+
+  return result.json as LooseRecord;
+}
+
+async function removeContactAssociation(input: {
+  accessToken: string;
+  locationId: string;
+  relationId: string;
+}) {
+  const result = await ghlRequest({
+    accessToken: input.accessToken,
+    endpoint: `/associations/relations/${encodeURIComponent(input.relationId)}?locationId=${encodeURIComponent(input.locationId)}`,
+    method: "DELETE",
+  });
+
+  console.log("DoorScale transaction team association remove:", {
+    relationId: input.relationId,
+    status: result.response.status,
+  });
+
+  if (!result.response.ok) {
+    throw new Error("Unable to remove contact from transaction team.");
+  }
+
+  return result.json as LooseRecord;
+}
 async function fetchAssociations(input: {
   accessToken: string;
   locationId: string;
@@ -481,9 +669,10 @@ export default async function handler(request: VercelRequest, response: VercelRe
   const body = (request.body ?? {}) as AssociationsBody;
   const transactionId = body.transactionId || "";
   const activeLocationId = getRequestedLocationId(request);
+  const teamAction = body.teamAction || "fetchAssociations";
 
-  if (!transactionId || !activeLocationId) {
-    response.status(400).json({ ok: false, message: "Transaction details are missing." });
+  if (!activeLocationId) {
+    response.status(400).json({ ok: false, message: "DoorScale account is missing." });
     return;
   }
 
@@ -491,6 +680,29 @@ export default async function handler(request: VercelRequest, response: VercelRe
     auth: { persistSession: false },
   });
   const connectedAccount = await getActiveLocation(request, supabase, "/api/ghl/transaction-associations");
+
+  if (teamAction === "searchContacts") {
+    const query = (body.query || "").trim();
+
+    if (query.length < 2) {
+      response.status(200).json({ contacts: [], ok: true });
+      return;
+    }
+
+    const contacts = await searchContacts({
+      accessToken: connectedAccount.access_token,
+      locationId: activeLocationId,
+      query,
+    });
+    response.status(200).json({ contacts, ok: true });
+    return;
+  }
+
+  if (!transactionId) {
+    response.status(400).json({ ok: false, message: "Transaction details are missing." });
+    return;
+  }
+
   const { data, error } = await supabase
     .from("transactions")
     .select("location_id, contact_id, ghl_contact_id, ghl_opportunity_id, property_address")
@@ -527,11 +739,94 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return;
   }
 
+  await fetchTransactionAssociationDefinitions({
+    accessToken: connectedAccount.access_token,
+    locationId: activeLocationId,
+  });
+
+  if (teamAction === "removeAssociation") {
+    if (!body.relationId) {
+      response.status(400).json({ ok: false, message: "Association details are missing." });
+      return;
+    }
+
+    await removeContactAssociation({
+      accessToken: connectedAccount.access_token,
+      locationId: activeLocationId,
+      relationId: body.relationId,
+    });
+    response.status(200).json({ ok: true, relationId: body.relationId });
+    return;
+  }
+
   const associations = await fetchAssociations({
     accessToken: connectedAccount.access_token,
     locationId: activeLocationId,
     recordId: objectRecord.recordId,
   });
+
+  if (teamAction === "addContactAssociation") {
+    const roleKey = normalizeAssociationKey(body.roleKey || "");
+    const contactId = body.contactId || "";
+
+    if (!roleKey || !contactId) {
+      response.status(400).json({ ok: false, message: "Contact and role are required." });
+      return;
+    }
+
+    const duplicate = findDuplicateContactRole({
+      associations,
+      contactId,
+      roleKey,
+    });
+
+    if (duplicate) {
+      response.status(409).json({ ok: false, message: "This contact already has that role on this transaction." });
+      return;
+    }
+
+    const associationId = getCachedAssociationId(activeLocationId, roleKey);
+
+    if (!associationId) {
+      response.status(400).json({ ok: false, message: "That transaction team role is not available for this DoorScale account yet." });
+      return;
+    }
+
+    const createdRelation = await createContactAssociation({
+      accessToken: connectedAccount.access_token,
+      associationId,
+      contactId,
+      locationId: activeLocationId,
+      transactionRecordId: objectRecord.recordId,
+    });
+
+    const definition = await fetchAssociationDefinition({
+      accessToken: connectedAccount.access_token,
+      associationId,
+      locationId: activeLocationId,
+    });
+    const entity = await hydrateRelatedRecord({
+      accessToken: connectedAccount.access_token,
+      locationId: activeLocationId,
+      objectKey: "contact",
+      recordId: contactId,
+    });
+    const association = normalizeHydratedAssociation({
+      definition: definition || undefined,
+      entity,
+      locationId: activeLocationId,
+      relation: {
+        associationId,
+        firstObjectKey: "contact",
+        firstRecordId: contactId,
+        id: (createdRelation as LooseRecord).id || (createdRelation as LooseRecord).relationId || (createdRelation as LooseRecord).relation?.id,
+      },
+    });
+
+    response.status(200).json({ association, ok: true });
+    return;
+  }
+
   const contactsByLabel = associations.filter(isContactAssociation).reduce<Record<string, NormalizedAssociation[]>>(
     (groups, association) => {
       const label = association.associationLabel || "Other Transaction Contact";

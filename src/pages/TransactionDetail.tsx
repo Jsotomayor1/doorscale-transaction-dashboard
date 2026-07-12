@@ -1,4 +1,4 @@
-﻿import { differenceInCalendarDays, format } from "date-fns";
+import { differenceInCalendarDays, format } from "date-fns";
 import {
   ArrowLeft,
   CalendarClock,
@@ -47,20 +47,47 @@ const WORKSPACE_STAGES = [
 ] as const;
 
 type WorkspaceTab = "tasks" | "documents" | "notes";
+
+const TEAM_ROLE_OPTIONS = [
+  { label: "Involved Party", value: "involved_party_buyersellertenant" },
+  { label: "Agent", value: "agent" },
+  { label: "Lender", value: "lender" },
+  { label: "Title/Escrow", value: "title_escrow" },
+  { label: "Inspector", value: "inspector" },
+  { label: "Attorney", value: "attorney" },
+  { label: "Appraiser", value: "appraiser" },
+  { label: "Insurance Agent", value: "insurance_agent" },
+  { label: "Transaction Coordinator", value: "transaction_coordinator" },
+  { label: "Other Transaction Contact", value: "other_transaction_contact" },
+] as const;
+
+type TeamRoleKey = (typeof TEAM_ROLE_OPTIONS)[number]["value"];
 type TransactionAssociation = {
   id: string;
+  associationId?: string;
+  associationKey?: string;
   associationLabel: string;
   company: string;
   email: string;
   name: string;
   openUrl: string;
   phone: string;
+  relationId?: string;
   role: string;
   type: "contact" | "company" | "property" | "unknown";
 };
 
+type TeamContactSearchResult = {
+  email: string;
+  id: string;
+  name: string;
+  phone: string;
+};
+
 type TransactionAssociationsResponse = {
+  association?: TransactionAssociation;
   associations?: TransactionAssociation[];
+  contacts?: TeamContactSearchResult[];
   contactsByLabel?: Record<string, TransactionAssociation[]>;
   linkedOrganization?: TransactionAssociation | null;
   linkedProperty?: TransactionAssociation | null;
@@ -229,6 +256,16 @@ export default function TransactionDetail() {
   const [transactionAssociations, setTransactionAssociations] =
     useState<TransactionAssociationsResponse>({});
   const [isLoadingAssociations, setIsLoadingAssociations] = useState(false);
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
+  const [teamRoleKey, setTeamRoleKey] =
+    useState<TeamRoleKey>("involved_party_buyersellertenant");
+  const [teamSearchQuery, setTeamSearchQuery] = useState("");
+  const [teamSearchResults, setTeamSearchResults] = useState<TeamContactSearchResult[]>([]);
+  const [selectedTeamContact, setSelectedTeamContact] =
+    useState<TeamContactSearchResult | null>(null);
+  const [isSearchingTeamContacts, setIsSearchingTeamContacts] = useState(false);
+  const [isSavingTeamAssociation, setIsSavingTeamAssociation] = useState(false);
+  const [teamAssociationError, setTeamAssociationError] = useState("");
   const transaction = data.opportunities.find(
     (opp) => String(opp.id) === String(id),
   );
@@ -424,6 +461,183 @@ export default function TransactionDetail() {
     maybeTransactionId,
     transaction,
   ]);
+
+  function addAssociationToLocalState(association: TransactionAssociation) {
+    setTransactionAssociations((current) => {
+      const label = association.associationLabel || "Other Transaction Contact";
+      const currentGroups = current.contactsByLabel || {};
+      const existingGroup = currentGroups[label] || [];
+      const duplicate = existingGroup.some(
+        (item) =>
+          item.id === association.id &&
+          (item.associationKey || item.associationLabel) ===
+            (association.associationKey || association.associationLabel),
+      );
+
+      if (duplicate) {
+        return current;
+      }
+
+      return {
+        ...current,
+        associations: [...(current.associations || []), association],
+        contactsByLabel: {
+          ...currentGroups,
+          [label]: [...existingGroup, association],
+        },
+      };
+    });
+  }
+
+  function removeAssociationFromLocalState(relationId: string) {
+    setTransactionAssociations((current) => {
+      const nextGroups = Object.entries(current.contactsByLabel || {}).reduce<
+        Record<string, TransactionAssociation[]>
+      >((groups, [label, contacts]) => {
+        const filtered = contacts.filter((contact) => contact.relationId !== relationId);
+        if (filtered.length) {
+          groups[label] = filtered;
+        }
+        return groups;
+      }, {});
+
+      return {
+        ...current,
+        associations: (current.associations || []).filter(
+          (association) => association.relationId !== relationId,
+        ),
+        contactsByLabel: nextGroups,
+      };
+    });
+  }
+
+  async function handleSearchTeamContacts(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    if (!maybeActiveLocationId || teamSearchQuery.trim().length < 2) {
+      setTeamSearchResults([]);
+      return;
+    }
+
+    setTeamAssociationError("");
+    setIsSearchingTeamContacts(true);
+
+    try {
+      const response = await fetch("/api/ghl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(maybeActiveLocationId),
+        },
+        body: JSON.stringify({
+          action: "searchTransactionTeamContacts",
+          active_location_id: maybeActiveLocationId,
+          locationId: maybeActiveLocationId,
+          query: teamSearchQuery,
+          teamAction: "searchContacts",
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as TransactionAssociationsResponse;
+
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to search contacts.");
+      }
+
+      setTeamSearchResults(result.contacts || []);
+    } catch (error) {
+      setTeamAssociationError(
+        error instanceof Error ? error.message : "Unable to search contacts.",
+      );
+    } finally {
+      setIsSearchingTeamContacts(false);
+    }
+  }
+
+  async function handleAddTeamContact(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedTeamContact || !maybeActiveLocationId || !maybeTransactionId) {
+      setTeamAssociationError("Select a contact to add.");
+      return;
+    }
+
+    setTeamAssociationError("");
+    setIsSavingTeamAssociation(true);
+
+    try {
+      const response = await fetch("/api/ghl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(maybeActiveLocationId),
+        },
+        body: JSON.stringify({
+          action: "addTransactionTeamContact",
+          active_location_id: maybeActiveLocationId,
+          contactId: selectedTeamContact.id,
+          locationId: maybeActiveLocationId,
+          roleKey: teamRoleKey,
+          teamAction: "addContactAssociation",
+          transactionId: maybeTransactionId,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as TransactionAssociationsResponse;
+
+      if (!response.ok || !result.association) {
+        throw new Error(result.message || "Unable to add contact.");
+      }
+
+      addAssociationToLocalState(result.association);
+      setIsTeamModalOpen(false);
+      setSelectedTeamContact(null);
+      setTeamSearchQuery("");
+      setTeamSearchResults([]);
+      setDetailMessage("Contact added to transaction team.");
+    } catch (error) {
+      setTeamAssociationError(error instanceof Error ? error.message : "Unable to add contact.");
+    } finally {
+      setIsSavingTeamAssociation(false);
+    }
+  }
+
+  async function handleRemoveTeamAssociation(contact: TransactionAssociation) {
+    if (!contact.relationId || !maybeActiveLocationId || !maybeTransactionId) {
+      setDetailError("Association details are missing.");
+      return;
+    }
+
+    setDetailMessage("");
+    setDetailError("");
+
+    try {
+      const response = await fetch("/api/ghl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getDoorScaleLocationHeaders(maybeActiveLocationId),
+        },
+        body: JSON.stringify({
+          action: "removeTransactionTeamAssociation",
+          active_location_id: maybeActiveLocationId,
+          locationId: maybeActiveLocationId,
+          relationId: contact.relationId,
+          teamAction: "removeAssociation",
+          transactionId: maybeTransactionId,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as TransactionAssociationsResponse;
+
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to remove contact.");
+      }
+
+      removeAssociationFromLocalState(contact.relationId);
+      setDetailMessage("Contact removed from transaction team.");
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "Unable to remove contact.");
+    }
+  }
+
   if (data.loading) {
     return (
       <div className="dashboard">
@@ -762,10 +976,12 @@ export default function TransactionDetail() {
 
       <EditTransactionModal isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} onSave={async (input) => { setDetailMessage(""); setDetailError(""); try { const message = await data.updateTransactionDetails(input); setDetailMessage(message || "Transaction details updated."); } catch (error) { setDetailError(error instanceof Error ? error.message : "Unable to update transaction."); throw error; } }} transaction={transaction} />
 
+      {isTeamModalOpen ? <div className="modal-backdrop" role="presentation"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="team-contact-title"><div className="modal__header"><div><h2 id="team-contact-title">Add Contact</h2><p>Connect an existing DoorScale contact to this transaction.</p></div><button aria-label="Close" onClick={() => setIsTeamModalOpen(false)} type="button">×</button></div><form className="task-create-form" onSubmit={handleAddTeamContact}><label className="task-create-form__wide"><span>Role</span><select onChange={(event) => setTeamRoleKey(event.target.value as TeamRoleKey)} value={teamRoleKey}>{TEAM_ROLE_OPTIONS.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label><div className="transaction-team-search task-create-form__wide"><label><span>Search contacts</span><input onChange={(event) => setTeamSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void handleSearchTeamContacts(); } }} placeholder="Name, email, or phone" value={teamSearchQuery} /></label><Button disabled={isSearchingTeamContacts || teamSearchQuery.trim().length < 2} onClick={() => void handleSearchTeamContacts()} type="button" variant="secondary">{isSearchingTeamContacts ? "Searching..." : "Search"}</Button></div>{teamSearchResults.length ? <div className="transaction-team-results task-create-form__wide">{teamSearchResults.map((contact) => <button className={`team-contact-card ${selectedTeamContact?.id === contact.id ? "is-selected" : ""}`} key={contact.id} onClick={() => setSelectedTeamContact(contact)} type="button"><div><strong>{contact.name}</strong>{contact.email ? <small>{contact.email}</small> : null}{contact.phone ? <small>{contact.phone}</small> : null}</div></button>)}</div> : null}{selectedTeamContact ? <div className="association-linked-card task-create-form__wide"><h4>Selected Contact</h4><strong>{selectedTeamContact.name}</strong>{selectedTeamContact.email ? <small>{selectedTeamContact.email}</small> : null}{selectedTeamContact.phone ? <small>{selectedTeamContact.phone}</small> : null}</div> : null}{teamAssociationError ? <p className="form-error task-create-form__wide">{teamAssociationError}</p> : null}<div className="modal__actions task-create-form__wide"><Button disabled={isSavingTeamAssociation || !selectedTeamContact} type="submit">{isSavingTeamAssociation ? "Adding..." : "Add Contact"}</Button><Button disabled={isSavingTeamAssociation} onClick={() => setIsTeamModalOpen(false)} type="button" variant="ghost">Cancel</Button></div></form></div></div> : null}
+
       <section className="transaction-workspace-layout">
         <div className="transaction-workspace-layout__left">
           <Card><CardHeader><div><CardTitle>Key Dates</CardTitle><CardDescription>Inspection and closing timeline.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Inspection Date</dt><dd>{formatDate(fields.inspectionDeadline)}</dd></div><div><dt>Closing Date</dt><dd><CalendarClock size={15} />{formatDate(fields.closingDate)}</dd></div><div><dt>Days Until Closing</dt><dd>{getDaysUntilClosing(fields.closingDate)}</dd></div></dl></CardContent></Card>
-          <Card><CardHeader><div><CardTitle>Transaction Team</CardTitle><CardDescription>Contacts associated with the CRM Transaction record.</CardDescription></div></CardHeader><CardContent><div className="transaction-team-list">{isLoadingAssociations ? <p className="empty-state">Loading transaction team...</p> : null}{associatedContactCount ? (Object.entries(associatedContactsByLabel) as Array<[string, TransactionAssociation[]]>).map(([label, contacts]) => <section className="association-group" key={label}><h4>{label}</h4>{contacts.map((contact) => <article className="team-contact-card" key={`${label}-${contact.id || contact.name}`}><div><strong>{contact.name}</strong><span>{contact.role || label}</span>{contact.company ? <small>{contact.company}</small> : null}{contact.email ? <small>{contact.email}</small> : null}{contact.phone ? <small>{contact.phone}</small> : null}</div>{contact.openUrl ? <a className="button button--secondary" href={contact.openUrl} rel="noreferrer" target="_blank">Open Contact</a> : null}</article>)}</section>) : <div className="team-contact-card"><div><strong>{primaryContactName}</strong><span>{primaryContactRole}</span>{fields.contactEmail ? <small>{fields.contactEmail}</small> : null}{fields.contactPhone ? <small>{fields.contactPhone}</small> : null}</div>{contactLink ? <a className="button button--secondary" href={contactLink} rel="noreferrer" target="_blank">Open Contact</a> : null}</div>}{linkedOrganization ? <section className="association-linked-card"><h4>Linked Organization</h4><strong>{linkedOrganization.name}</strong>{linkedOrganization.email ? <small>{linkedOrganization.email}</small> : null}{linkedOrganization.phone ? <small>{linkedOrganization.phone}</small> : null}</section> : null}{linkedProperty ? <section className="association-linked-card"><h4>Property</h4><strong>{linkedProperty.name}</strong>{linkedProperty.company ? <small>{linkedProperty.company}</small> : null}</section> : null}</div><Button disabled variant="ghost">Add Contact - Coming next</Button></CardContent></Card>
+          <Card><CardHeader><div><CardTitle>Transaction Team</CardTitle><CardDescription>Contacts associated with the CRM Transaction record.</CardDescription></div></CardHeader><CardContent><div className="transaction-team-list">{isLoadingAssociations ? <p className="empty-state">Loading transaction team...</p> : null}{associatedContactCount ? (Object.entries(associatedContactsByLabel) as Array<[string, TransactionAssociation[]]>).map(([label, contacts]) => <section className="association-group" key={label}><h4>{label}</h4>{contacts.map((contact) => <article className="team-contact-card" key={`${label}-${contact.relationId || contact.id || contact.name}`}><div><strong>{contact.name}</strong><span>{contact.role || label}</span>{contact.company ? <small>{contact.company}</small> : null}{contact.email ? <small>{contact.email}</small> : null}{contact.phone ? <small>{contact.phone}</small> : null}</div><div className="document-actions">{contact.openUrl ? <a className="button button--secondary" href={contact.openUrl} rel="noreferrer" target="_blank">Open Contact</a> : null}{contact.relationId ? <button className="button button--ghost" onClick={() => void handleRemoveTeamAssociation(contact)} type="button">Remove Association</button> : null}</div></article>)}</section>) : <div className="team-contact-card"><div><strong>{primaryContactName}</strong><span>{primaryContactRole}</span>{fields.contactEmail ? <small>{fields.contactEmail}</small> : null}{fields.contactPhone ? <small>{fields.contactPhone}</small> : null}</div>{contactLink ? <a className="button button--secondary" href={contactLink} rel="noreferrer" target="_blank">Open Contact</a> : null}</div>}{linkedOrganization ? <section className="association-linked-card"><h4>Linked Organization</h4><strong>{linkedOrganization.name}</strong>{linkedOrganization.email ? <small>{linkedOrganization.email}</small> : null}{linkedOrganization.phone ? <small>{linkedOrganization.phone}</small> : null}</section> : null}{linkedProperty ? <section className="association-linked-card"><h4>Property</h4><strong>{linkedProperty.name}</strong>{linkedProperty.company ? <small>{linkedProperty.company}</small> : null}</section> : null}</div><Button onClick={() => { setTeamAssociationError(""); setIsTeamModalOpen(true); }} type="button" variant="ghost">Add Contact</Button></CardContent></Card>
           <Card><CardHeader><div><CardTitle>Financial Summary</CardTitle><CardDescription>Projected transaction value.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Commission</dt><dd>{formatCurrency(transaction.value)}</dd></div><div><dt>Status</dt><dd>{transaction.status || "Not set"}</dd></div><div><dt>Assigned Agent</dt><dd>{fields.assignedAgent || "Not assigned"}</dd></div></dl></CardContent></Card>
           {propertyAddress !== "Property not set" ? <Card><CardHeader><div><CardTitle>Property Details</CardTitle><CardDescription>Transaction property information.</CardDescription></div></CardHeader><CardContent><dl className="detail-list"><div><dt>Address</dt><dd>{propertyAddress}</dd></div><div><dt>Transaction Type</dt><dd>{fields.transactionType || "Not set"}</dd></div></dl></CardContent></Card> : null}
         </div>
@@ -778,6 +994,7 @@ export default function TransactionDetail() {
     </div>
   );
 }
+
 
 
 
