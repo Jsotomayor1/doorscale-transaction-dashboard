@@ -42,6 +42,7 @@ type ContactSearchResult = {
   id: string;
   name: string;
   phone: string;
+  company?: string;
 };
 
 type AssociationsBody = {
@@ -54,6 +55,7 @@ type AssociationsBody = {
   roleKey?: string;
   contactId?: string;
   relationId?: string;
+  companyName?: string;
 };
 
 type TransactionRow = {
@@ -89,6 +91,17 @@ type NormalizedAssociation = {
   role: string;
   type: "contact" | "company" | "property" | "unknown";
   relationId?: string;
+};
+
+type TransactionContactRow = {
+  company_name?: string | null;
+  created_at?: string | null;
+  ghl_contact_id: string;
+  is_primary?: boolean | null;
+  location_id: string;
+  role: string;
+  transaction_id: string | number;
+  updated_at?: string | null;
 };
 
 function normalizeLabel(label = "") {
@@ -542,8 +555,10 @@ function getContactsFromPayload(payload: unknown) {
 
 function normalizeContactSearchResult(contact: LooseRecord): ContactSearchResult {
   const id = getId(contact);
+  const properties = getProperties(contact);
 
   return {
+    company: contact.company || contact.companyName || properties.company || "",
     email: contact.email || "",
     id,
     name: getName(contact),
@@ -577,6 +592,196 @@ async function searchContacts(input: {
   });
 
   return contacts;
+}
+
+function buildRelationId(contactId: string, role: string) {
+  return `${contactId}::${normalizeAssociationKey(role)}`;
+}
+
+function getRoleLabelFromKey(role = "") {
+  const roleKey = normalizeAssociationKey(role);
+  return ROLE_LABEL_BY_ASSOCIATION_KEY[roleKey] || displayLabel(roleKey.replace(/_/g, " "));
+}
+
+function normalizeTransactionContact(input: {
+  contact: LooseRecord;
+  locationId: string;
+  row: TransactionContactRow;
+}): NormalizedAssociation {
+  const properties = getProperties(input.contact);
+  const contactId = input.row.ghl_contact_id;
+  const roleKey = normalizeAssociationKey(input.row.role);
+  const roleLabel = getRoleLabelFromKey(roleKey);
+  const crmCompany =
+    input.contact.company ||
+    input.contact.companyName ||
+    input.contact.businessName ||
+    properties.company ||
+    properties.companyName ||
+    properties.businessName ||
+    "";
+
+  return {
+    associationId: "",
+    associationKey: roleKey,
+    associationLabel: roleLabel,
+    company: crmCompany || input.row.company_name || "",
+    email: input.contact.email || properties.email || "",
+    id: contactId,
+    name: getName(input.contact),
+    openUrl: contactId
+      ? `https://app.gohighlevel.com/v2/location/${input.locationId}/contacts/detail/${contactId}`
+      : "",
+    phone: input.contact.phone || properties.phone || "",
+    relationId: buildRelationId(contactId, roleKey),
+    role: roleLabel,
+    type: "contact",
+  };
+}
+
+async function fetchLiveContact(input: {
+  accessToken: string;
+  contactId: string;
+  locationId: string;
+}) {
+  return hydrateRelatedRecord({
+    accessToken: input.accessToken,
+    locationId: input.locationId,
+    objectKey: "contact",
+    recordId: input.contactId,
+  });
+}
+
+async function fetchTransactionTeam(input: {
+  accessToken: string;
+  db: any;
+  locationId: string;
+  transactionId: string;
+}) {
+  const { data, error } = await input.db
+    .from("transaction_contacts")
+    .select("transaction_id, location_id, ghl_contact_id, role, is_primary, company_name, created_at, updated_at")
+    .eq("transaction_id", input.transactionId)
+    .eq("location_id", input.locationId)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("DoorScale transaction team relationship lookup failed:", {
+      error,
+      locationId: input.locationId,
+      transactionId: input.transactionId,
+    });
+    throw new Error("Unable to load transaction team.");
+  }
+
+  const rows = (data || []) as TransactionContactRow[];
+  const associations = await Promise.all(
+    rows.map(async (row) => {
+      const contact = await fetchLiveContact({
+        accessToken: input.accessToken,
+        contactId: row.ghl_contact_id,
+        locationId: input.locationId,
+      });
+
+      return normalizeTransactionContact({
+        contact,
+        locationId: input.locationId,
+        row,
+      });
+    }),
+  );
+
+  console.log("DoorScale transaction team loaded from relationship table:", {
+    contactCount: associations.length,
+    locationId: input.locationId,
+    transactionId: input.transactionId,
+  });
+
+  return associations;
+}
+
+function groupTransactionTeam(associations: NormalizedAssociation[]) {
+  return associations.reduce<Record<string, NormalizedAssociation[]>>((groups, association) => {
+    const label = association.associationLabel || "Other Transaction Contact";
+    groups[label] = [...(groups[label] || []), association];
+    return groups;
+  }, {});
+}
+
+function parseRelationId(relationId = "") {
+  const [contactId, ...roleParts] = relationId.split("::");
+  return {
+    contactId,
+    roleKey: normalizeAssociationKey(roleParts.join("::")),
+  };
+}
+
+async function insertTransactionContact(input: {
+  companyName?: string;
+  contactId: string;
+  db: any;
+  locationId: string;
+  roleKey: string;
+  transactionId: string;
+}) {
+  const now = new Date().toISOString();
+  const payload = {
+    company_name: input.companyName || null,
+    created_at: now,
+    ghl_contact_id: input.contactId,
+    is_primary: false,
+    location_id: input.locationId,
+    role: input.roleKey,
+    transaction_id: input.transactionId,
+    updated_at: now,
+  };
+
+  const { data, error } = await input.db
+    .from("transaction_contacts")
+    .insert(payload)
+    .select("transaction_id, location_id, ghl_contact_id, role, is_primary, company_name, created_at, updated_at")
+    .single();
+
+  if (error) {
+    console.error("DoorScale transaction team relationship insert failed:", {
+      contactId: input.contactId,
+      error,
+      locationId: input.locationId,
+      roleKey: input.roleKey,
+      transactionId: input.transactionId,
+    });
+    throw new Error("Unable to add contact.");
+  }
+
+  return data as TransactionContactRow;
+}
+
+async function deleteTransactionContact(input: {
+  contactId: string;
+  db: any;
+  locationId: string;
+  roleKey: string;
+  transactionId: string;
+}) {
+  const { error } = await input.db
+    .from("transaction_contacts")
+    .delete()
+    .eq("transaction_id", input.transactionId)
+    .eq("location_id", input.locationId)
+    .eq("ghl_contact_id", input.contactId)
+    .eq("role", input.roleKey);
+
+  if (error) {
+    console.error("DoorScale transaction team relationship delete failed:", {
+      contactId: input.contactId,
+      error,
+      locationId: input.locationId,
+      roleKey: input.roleKey,
+      transactionId: input.transactionId,
+    });
+    throw new Error("Unable to remove contact.");
+  }
 }
 
 function findDuplicateContactRole(input: {
@@ -798,50 +1003,35 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return;
   }
 
-  const transaction = data as TransactionRow;
-  const objectRecord = await findTransactionObjectRecord({
-    accessToken: connectedAccount.access_token,
-    locationId: activeLocationId,
-    transaction,
-  });
-
-  if (!objectRecord.recordId || !objectRecord.objectKey) {
-    response.status(200).json({
-      associations: [],
-      contactsByLabel: {},
-      linkedOrganization: null,
-      linkedProperty: null,
-      objectKey: TRANSACTION_OBJECT_KEY,
-      objectRecordId: "",
-      ok: true,
-    });
-    return;
-  }
-
-  await fetchTransactionAssociationDefinitions({
-    accessToken: connectedAccount.access_token,
-    locationId: activeLocationId,
-  });
-
   if (teamAction === "removeAssociation") {
     if (!body.relationId) {
       response.status(400).json({ ok: false, message: "Association details are missing." });
       return;
     }
 
-    await removeContactAssociation({
-      accessToken: connectedAccount.access_token,
+    const parsedRelation = parseRelationId(body.relationId);
+
+    if (!parsedRelation.contactId || !parsedRelation.roleKey) {
+      response.status(400).json({ ok: false, message: "Association details are missing." });
+      return;
+    }
+
+    await deleteTransactionContact({
+      contactId: parsedRelation.contactId,
+      db: supabase,
       locationId: activeLocationId,
-      relationId: body.relationId,
+      roleKey: parsedRelation.roleKey,
+      transactionId,
     });
     response.status(200).json({ ok: true, relationId: body.relationId });
     return;
   }
 
-  const associations = await fetchAssociations({
+  const associations = await fetchTransactionTeam({
     accessToken: connectedAccount.access_token,
+    db: supabase,
     locationId: activeLocationId,
-    recordId: objectRecord.recordId,
+    transactionId,
   });
 
   if (teamAction === "addContactAssociation") {
@@ -853,100 +1043,48 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return;
     }
 
-    const duplicate = findDuplicateContactRole({
-      associations,
-      contactId,
-      roleKey,
-    });
+    const duplicate = associations.find(
+      (association) => association.id === contactId && association.associationKey === roleKey,
+    );
 
     if (duplicate) {
       response.status(409).json({ ok: false, message: "This contact already has that role on this transaction." });
       return;
     }
 
-    const associationId = getCachedAssociationId(activeLocationId, roleKey);
-
-    if (!associationId) {
-      response.status(400).json({ ok: false, message: "That transaction team role is not available for this DoorScale account yet." });
-      return;
-    }
-
-    let createdRelation: LooseRecord;
-
-    try {
-      console.log("DoorScale transaction team add contact selected values:", {
-        associationId,
-        contactId,
-        roleKey,
-        transactionRecordId: objectRecord.recordId,
-      });
-
-      createdRelation = await createContactAssociation({
-        accessToken: connectedAccount.access_token,
-        associationId,
-        contactId,
-        locationId: activeLocationId,
-        roleKey,
-        transactionRecordId: objectRecord.recordId,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to add contact to transaction team.";
-
-      console.error("DoorScale transaction team add contact failed:", {
-        associationId,
-        contactId,
-        localErrorMessage: message,
-        roleKey,
-        transactionRecordId: objectRecord.recordId,
-      });
-
-      response.status(502).json({ ok: false, message });
-      return;
-    }
-
-    const definition = await fetchAssociationDefinition({
+    const inserted = await insertTransactionContact({
+      companyName: body.companyName,
+      contactId,
+      db: supabase,
+      locationId: activeLocationId,
+      roleKey,
+      transactionId,
+    });
+    const contact = await fetchLiveContact({
       accessToken: connectedAccount.access_token,
-      associationId,
+      contactId,
       locationId: activeLocationId,
     });
-    const entity = await hydrateRelatedRecord({
-      accessToken: connectedAccount.access_token,
+
+    const association = normalizeTransactionContact({
+      contact,
       locationId: activeLocationId,
-      objectKey: "contact",
-      recordId: contactId,
-    });
-    const association = normalizeHydratedAssociation({
-      definition: definition || undefined,
-      entity,
-      locationId: activeLocationId,
-      relation: {
-        associationId,
-        firstObjectKey: "contact",
-        firstRecordId: contactId,
-        id: (createdRelation as LooseRecord).id || (createdRelation as LooseRecord).relationId || (createdRelation as LooseRecord).relation?.id,
-      },
+      row: inserted,
     });
 
     response.status(200).json({ association, ok: true });
     return;
   }
 
-  const contactsByLabel = associations.filter(isContactAssociation).reduce<Record<string, NormalizedAssociation[]>>(
-    (groups, association) => {
-      const label = association.associationLabel || "Other Transaction Contact";
-      groups[label] = [...(groups[label] || []), association];
-      return groups;
-    },
-    {},
-  );
+  const contactsByLabel = groupTransactionTeam(associations);
 
   response.status(200).json({
     associations,
     contactsByLabel,
-    linkedOrganization: associations.find((association) => association.type === "company") || null,
-    linkedProperty: associations.find((association) => association.type === "property") || null,
-    objectKey: objectRecord.objectKey,
-    objectRecordId: objectRecord.recordId,
+    linkedOrganization: null,
+    linkedProperty: null,
+    objectKey: "",
+    objectRecordId: "",
     ok: true,
   });
 }

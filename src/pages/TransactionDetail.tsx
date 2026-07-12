@@ -78,6 +78,7 @@ type TransactionAssociation = {
 };
 
 type TeamContactSearchResult = {
+  company?: string;
   email: string;
   id: string;
   name: string;
@@ -574,6 +575,7 @@ export default function TransactionDetail() {
         body: JSON.stringify({
           action: "addTransactionTeamContact",
           active_location_id: maybeActiveLocationId,
+          companyName: selectedTeamContact.company || "",
           contactId: selectedTeamContact.id,
           locationId: maybeActiveLocationId,
           roleKey: teamRoleKey,
