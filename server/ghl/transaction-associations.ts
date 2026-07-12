@@ -548,11 +548,22 @@ function getCachedAssociationId(locationId: string, roleKey: string) {
   return roleAssociationIdCache.get(locationId)?.[roleKey] || "";
 }
 
+function getGhlErrorMessage(payload: unknown, fallback = "Unable to add contact to transaction team.") {
+  const body = payload as LooseRecord;
+  const message = body?.message || body?.error || body?.msg || body?.raw;
+
+  if (Array.isArray(message)) return message.join("; ");
+  if (message) return String(message);
+
+  return fallback;
+}
+
 async function createContactAssociation(input: {
   accessToken: string;
   associationId: string;
   contactId: string;
   locationId: string;
+  roleKey: string;
   transactionRecordId: string;
 }) {
   const payload = {
@@ -568,15 +579,21 @@ async function createContactAssociation(input: {
     method: "POST",
   });
 
-  console.log("DoorScale transaction team association create:", {
+  console.log("DoorScale transaction team association create request:", {
     associationId: input.associationId,
     contactId: input.contactId,
-    status: result.response.status,
+    payloadKeys: Object.keys(payload),
+    roleKey: input.roleKey,
     transactionRecordId: input.transactionRecordId,
   });
 
+  console.log("DoorScale transaction team association create response:", {
+    body: result.json,
+    status: result.response.status,
+  });
+
   if (!result.response.ok) {
-    throw new Error("Unable to add contact to transaction team.");
+    throw new Error(getGhlErrorMessage(result.json));
   }
 
   return result.json as LooseRecord;
@@ -792,13 +809,38 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return;
     }
 
-    const createdRelation = await createContactAssociation({
-      accessToken: connectedAccount.access_token,
-      associationId,
-      contactId,
-      locationId: activeLocationId,
-      transactionRecordId: objectRecord.recordId,
-    });
+    let createdRelation: LooseRecord;
+
+    try {
+      console.log("DoorScale transaction team add contact selected values:", {
+        associationId,
+        contactId,
+        roleKey,
+        transactionRecordId: objectRecord.recordId,
+      });
+
+      createdRelation = await createContactAssociation({
+        accessToken: connectedAccount.access_token,
+        associationId,
+        contactId,
+        locationId: activeLocationId,
+        roleKey,
+        transactionRecordId: objectRecord.recordId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to add contact to transaction team.";
+
+      console.error("DoorScale transaction team add contact failed:", {
+        associationId,
+        contactId,
+        localErrorMessage: message,
+        roleKey,
+        transactionRecordId: objectRecord.recordId,
+      });
+
+      response.status(502).json({ ok: false, message });
+      return;
+    }
 
     const definition = await fetchAssociationDefinition({
       accessToken: connectedAccount.access_token,
