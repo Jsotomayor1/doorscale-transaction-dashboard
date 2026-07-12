@@ -228,20 +228,61 @@ function collectAssociationDefinitions(payload: unknown) {
   return definitions;
 }
 
+function getBodyKeys(body: unknown) {
+  return body && typeof body === "object" && !Array.isArray(body)
+    ? Object.keys(body as LooseRecord)
+    : [];
+}
+
+function getTokenDiagnostics(token = "") {
+  const raw = String(token);
+  const trimmed = raw.trim();
+  const withoutBearer = trimmed.replace(/^Bearer\s+/i, "");
+  const withoutQuotes = withoutBearer.replace(/^["']|["']$/g, "");
+
+  return {
+    hasBearerPrefix: /^Bearer\s+/i.test(trimmed),
+    hasQuoteWrapper: /^["'].*["']$/.test(withoutBearer),
+    rawLength: raw.length,
+    sentLength: withoutQuotes.length,
+  };
+}
+
 async function ghlRequest(input: {
   accessToken: string;
   body?: unknown;
   endpoint: string;
   method: "DELETE" | "GET" | "POST";
+  locationId?: string;
 }) {
-  const response = await fetch(`${API_BASE}${input.endpoint}`, {
+  const url = new URL(input.endpoint, API_BASE);
+  const normalizedToken = input.accessToken
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["']|["']$/g, "");
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Bearer ${normalizedToken}`,
+    "Content-Type": "application/json",
+    Version: API_VERSION,
+  };
+
+  console.log("DoorScale GHL request diagnostics:", {
+    baseUrl: API_BASE,
+    bodyKeys: getBodyKeys(input.body),
+    contentTypeHeader: headers["Content-Type"],
+    endpoint: input.endpoint,
+    headerNames: Object.keys(headers),
+    locationId: input.locationId || null,
     method: input.method,
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${input.accessToken.replace(/^Bearer\s+/i, "")}`,
-      "Content-Type": "application/json",
-      Version: API_VERSION,
-    },
+    token: getTokenDiagnostics(input.accessToken),
+    url: url.toString().replace(API_BASE, "{GHL_API_BASE}"),
+    versionHeader: headers.Version,
+  });
+
+  const response = await fetch(url, {
+    method: input.method,
+    headers,
     body: input.body ? JSON.stringify(input.body) : undefined,
   });
   const text = await response.text();
@@ -285,6 +326,7 @@ async function findTransactionObjectRecord(input: {
     accessToken: input.accessToken,
     body: searchBody,
     endpoint: `/objects/${encodeURIComponent(TRANSACTION_OBJECT_KEY)}/records/search`,
+    locationId: input.locationId,
     method: "POST",
   });
   const records = extractArray(search.json, ["records", "items", "data"]);
@@ -316,6 +358,7 @@ async function fetchAssociationDefinition(input: {
   const result = await ghlRequest({
     accessToken: input.accessToken,
     endpoint: `/associations/${encodeURIComponent(input.associationId)}?locationId=${encodeURIComponent(input.locationId)}`,
+    locationId: input.locationId,
     method: "GET",
   });
 
@@ -350,6 +393,7 @@ async function fetchTransactionAssociationDefinitions(input: {
   const result = await ghlRequest({
     accessToken: input.accessToken,
     endpoint: `/objects/${encodeURIComponent(TRANSACTION_OBJECT_KEY)}?locationId=${encodeURIComponent(input.locationId)}&fetchProperties=true`,
+    locationId: input.locationId,
     method: "GET",
   });
 
@@ -416,6 +460,7 @@ async function hydrateRelatedRecord(input: {
     const result = await ghlRequest({
       accessToken: input.accessToken,
       endpoint: `/contacts/${encodeURIComponent(input.recordId)}`,
+      locationId: input.locationId,
       method: "GET",
     });
     return result.response.ok ? getEntityFromPayload(result.json, ["contact"]) : {};
@@ -425,6 +470,7 @@ async function hydrateRelatedRecord(input: {
     const result = await ghlRequest({
       accessToken: input.accessToken,
       endpoint: `/businesses/${encodeURIComponent(input.recordId)}?locationId=${encodeURIComponent(input.locationId)}`,
+      locationId: input.locationId,
       method: "GET",
     });
     return result.response.ok ? getEntityFromPayload(result.json, ["business", "record"]) : {};
@@ -434,6 +480,7 @@ async function hydrateRelatedRecord(input: {
     const result = await ghlRequest({
       accessToken: input.accessToken,
       endpoint: `/objects/${encodeURIComponent(input.objectKey)}/records/${encodeURIComponent(input.recordId)}`,
+      locationId: input.locationId,
       method: "GET",
     });
     return result.response.ok ? getEntityFromPayload(result.json, ["record"]) : {};
@@ -518,6 +565,7 @@ async function searchContacts(input: {
       query: input.query,
     },
     endpoint: "/contacts/search",
+    locationId: input.locationId,
     method: "POST",
   });
   const contacts = getContactsFromPayload(result.json).map(normalizeContactSearchResult);
@@ -576,6 +624,7 @@ async function createContactAssociation(input: {
     accessToken: input.accessToken,
     body: payload,
     endpoint: "/associations/relations",
+    locationId: input.locationId,
     method: "POST",
   });
 
@@ -607,6 +656,7 @@ async function removeContactAssociation(input: {
   const result = await ghlRequest({
     accessToken: input.accessToken,
     endpoint: `/associations/relations/${encodeURIComponent(input.relationId)}?locationId=${encodeURIComponent(input.locationId)}`,
+    locationId: input.locationId,
     method: "DELETE",
   });
 
@@ -629,6 +679,7 @@ async function fetchAssociations(input: {
   const result = await ghlRequest({
     accessToken: input.accessToken,
     endpoint: `/associations/relations/${encodeURIComponent(input.recordId)}?locationId=${encodeURIComponent(input.locationId)}&skip=0&limit=20`,
+    locationId: input.locationId,
     method: "GET",
   });
   const rows = extractArray(result.json, ["relations", "associations", "items", "data"]);
@@ -697,6 +748,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
     auth: { persistSession: false },
   });
   const connectedAccount = await getActiveLocation(request, supabase, "/api/ghl/transaction-associations");
+
+  console.log("DoorScale transaction association connected-location diagnostics:", {
+    activeLocationId,
+    connectionId: connectedAccount.id,
+    connectionLocationId: connectedAccount.location_id,
+    connectionStatus: connectedAccount.connection.connection_status,
+    hasToken: Boolean(connectedAccount.access_token),
+    requestedLocationId: activeLocationId,
+    token: getTokenDiagnostics(connectedAccount.access_token),
+    userType: connectedAccount.connection.user_type,
+  });
 
   if (teamAction === "searchContacts") {
     const query = (body.query || "").trim();
