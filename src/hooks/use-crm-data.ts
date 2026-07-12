@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addDays, subDays } from "date-fns";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -804,6 +804,119 @@ function mergeSyncedTransaction(
             syncStatus: mappedOpportunity.syncStatus,
           }
         : currentOpportunity,
+    ),
+  };
+}
+
+function mergeEditedTransaction(
+  currentData: CrmDataState,
+  input: UpdateTransactionDetailsInput,
+  updatedTransaction?: Partial<SupabaseTransaction>,
+): CrmDataState {
+  const commission = Number(input.commission || updatedTransaction?.commission || 0);
+  const updatedAt = updatedTransaction?.updated_at || new Date().toISOString();
+  const contactName =
+    [
+      input.clientFirstName || updatedTransaction?.client_first_name,
+      input.clientLastName || updatedTransaction?.client_last_name,
+    ]
+      .filter(Boolean)
+      .join(" ") ||
+    updatedTransaction?.contact_name ||
+    input.buyerName ||
+    input.sellerName ||
+    input.propertyAddress;
+  const transactionId = String(updatedTransaction?.id || input.transactionId);
+
+  return {
+    ...currentData,
+    transactions: currentData.transactions.map((transaction) =>
+      String(transaction.id) === transactionId
+        ? {
+            ...transaction,
+            assignedTo: input.assignedTo,
+            buyerName: input.buyerName,
+            clientEmail: input.clientEmail,
+            clientFirstName: input.clientFirstName,
+            clientLastName: input.clientLastName,
+            clientName: contactName || transaction.clientName,
+            clientPhone: input.clientPhone,
+            closeDate: input.closingDate,
+            commission,
+            contactEmail: input.clientEmail,
+            contactName: contactName || transaction.contactName,
+            contactPhone: input.clientPhone,
+            contractValue: commission,
+            ghlContactId:
+              updatedTransaction?.ghl_contact_id ??
+              updatedTransaction?.contact_id ??
+              transaction.ghlContactId,
+            ghlLocationId:
+              updatedTransaction?.ghl_location_id ??
+              updatedTransaction?.location_id ??
+              transaction.ghlLocationId,
+            ghlOpportunityId:
+              updatedTransaction?.ghl_opportunity_id ?? transaction.ghlOpportunityId,
+            inspectionDate: input.inspectionDate,
+            lastSyncError:
+              updatedTransaction?.last_sync_error ?? transaction.lastSyncError,
+            lastSyncedAt:
+              updatedTransaction?.last_synced_at ?? transaction.lastSyncedAt,
+            propertyAddress: input.propertyAddress,
+            sellerName: input.sellerName,
+            status: input.status,
+            syncStatus: updatedTransaction?.sync_status ?? transaction.syncStatus,
+            type: input.transactionType,
+            updatedAt,
+          }
+        : transaction,
+    ),
+    opportunities: currentData.opportunities.map((opportunity) =>
+      String(opportunity.id) === transactionId
+        ? {
+            ...opportunity,
+            assignedTo: input.assignedTo,
+            contactId:
+              updatedTransaction?.contact_id ??
+              updatedTransaction?.ghl_contact_id ??
+              opportunity.contactId,
+            ghlContactId:
+              updatedTransaction?.ghl_contact_id ??
+              updatedTransaction?.contact_id ??
+              opportunity.ghlContactId,
+            ghlLocationId:
+              updatedTransaction?.ghl_location_id ??
+              updatedTransaction?.location_id ??
+              opportunity.ghlLocationId,
+            ghlOpportunityId:
+              updatedTransaction?.ghl_opportunity_id ?? opportunity.ghlOpportunityId,
+            lastSyncError:
+              updatedTransaction?.last_sync_error ?? opportunity.lastSyncError,
+            lastSyncedAt:
+              updatedTransaction?.last_synced_at ?? opportunity.lastSyncedAt,
+            name: input.propertyAddress,
+            status: input.status,
+            syncStatus: updatedTransaction?.sync_status ?? opportunity.syncStatus,
+            updatedAt,
+            value: commission,
+            customFields: {
+              ...opportunity.customFields,
+              agentPayout: commission,
+              assignedAgent: input.assignedTo,
+              buyerName: input.buyerName,
+              closingDate: input.closingDate,
+              contactEmail: input.clientEmail,
+              contactName,
+              contactPhone: input.clientPhone,
+              grossCommission: commission,
+              inspectionDeadline: input.inspectionDate,
+              netCommission: commission,
+              propertyAddress: input.propertyAddress,
+              sellerName: input.sellerName,
+              transactionType: input.transactionType,
+            },
+          }
+        : opportunity,
     ),
   };
 }
@@ -2206,13 +2319,15 @@ export function useCrmData() {
       });
       const result = await parseTransactionWriteResponse(response);
 
-      await refreshData();
+      setData((currentData) =>
+        mergeEditedTransaction(currentData, input, result.transaction),
+      );
 
       return result.ok === false
         ? result.message || "Transaction saved locally. DoorScale sync will retry later."
         : undefined;
     },
-    [activeLocationId, refreshData],
+    [activeLocationId],
   );
 
   const createTask = useCallback(
@@ -3223,6 +3338,8 @@ export function useCrmData() {
 }
 
 export const useCRMData = useCrmData;
+
+
 
 
 
